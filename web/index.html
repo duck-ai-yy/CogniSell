@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Second Brain CRM</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-mark">SB</span>
+      <span class="brand-name">Second Brain CRM</span>
+    </div>
+    <div id="system-state" class="system-state">fake demo · Graph Core</div>
+  </header>
+
+  <main id="workspace">
+    <section id="asset-pane" aria-label="客户数据资产">
+      <div class="asset-toolbar">
+        <div>
+          <h1>客户数据资产</h1>
+          <div id="asset-summary" class="summary-line"></div>
+        </div>
+        <div class="toolbar-actions">
+          <button class="icon-btn" data-act="scan" title="扫描名片">Scan</button>
+          <button class="icon-btn" data-act="strategy" title="生成触达策略">Draft</button>
+          <button class="icon-btn" data-act="catchup" title="检查长期未联系客户">Catch-up</button>
+          <button id="skills-btn" class="icon-btn ghost" title="技能开关">Skills</button>
+        </div>
+        <div id="skills-panel" class="skills-panel" hidden></div>
+      </div>
+
+      <div id="asset-grid">
+        <aside id="customer-list" aria-label="客户列表"></aside>
+        <section id="customer-detail" aria-label="客户详情">
+          <div id="detail-empty" class="empty-state" hidden>
+            <div class="empty-icon">CRM</div>
+            <p>暂无客户数据。</p>
+          </div>
+
+          <div id="detail-content" hidden>
+            <div class="detail-header">
+              <div>
+                <div id="customer-kind" class="eyebrow"></div>
+                <h2 id="customer-title"></h2>
+                <div id="customer-subtitle" class="summary-line"></div>
+              </div>
+              <div id="state-pills" class="state-pills"></div>
+            </div>
+
+            <div class="metric-strip">
+              <div class="metric">
+                <span class="metric-value" id="metric-facts">0</span>
+                <span class="metric-label">facts</span>
+              </div>
+              <div class="metric">
+                <span class="metric-value" id="metric-confidence">0%</span>
+                <span class="metric-label">avg confidence</span>
+              </div>
+              <div class="metric">
+                <span class="metric-value" id="metric-stale">0</span>
+                <span class="metric-label">stale ties</span>
+              </div>
+              <div class="metric">
+                <span class="metric-value" id="metric-proposed">0</span>
+                <span class="metric-label">needs review</span>
+              </div>
+            </div>
+
+            <section class="asset-section">
+              <div class="section-head">
+                <h3>关系事实</h3>
+                <span class="section-meta">Graph Core SSOT</span>
+              </div>
+              <div id="fact-list" class="fact-list"></div>
+            </section>
+
+            <section class="asset-section">
+              <div class="section-head">
+                <h3>认知审计</h3>
+                <span class="section-meta">source · extractor · supersedes</span>
+              </div>
+              <div id="audit-list" class="audit-list"></div>
+            </section>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <aside id="agent-pane" aria-label="Agent确认任务">
+      <div class="agent-head">
+        <div>
+          <h2>Agent确认任务</h2>
+          <div id="inbox-count" class="summary-line">0 pending</div>
+        </div>
+        <button id="voice-btn" class="voice-btn" title="语音指令">Voice</button>
+      </div>
+
+      <div id="voice-fallback" class="voice-fallback" hidden>
+        <input id="voice-text" class="text-input" placeholder="keep Andreas / fix the company / catch up" />
+        <button id="voice-send" class="btn">Send</button>
+      </div>
+
+      <div id="inbox-list" class="waterfall"></div>
+      <div id="inbox-empty" class="empty-state">
+        <div class="empty-icon">OK</div>
+        <p>没有待确认任务。</p>
+      </div>
+    </aside>
+  </main>
+
+  <div id="candidate-modal" class="modal" hidden>
+    <div class="modal-box">
+      <h3>扫描结果</h3>
+      <div id="candidate-list"></div>
+      <div class="modal-actions">
+        <button id="candidate-cancel" class="btn ghost">Cancel</button>
+        <button id="candidate-confirm" class="btn">Keep selected</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

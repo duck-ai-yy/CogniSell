@@ -1,0 +1,38 @@
+# --- agent prompt / skill 是 top 机密，永远本地 ---
+# 默认整个 .claude/ 不进 repo（覆盖 agents / skills / hooks 等）
+.claude/
+
+# --- 项目宪法属开发 harness，不公开 ---
+CLAUDE.md
+
+# --- 内部协作 / 磨合记录，永远本地 ---
+tuning-log.md
+
+# --- Python ---
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# --- 环境 / 密钥（绝不进库）---
+.env
+*.local
+
+# --- 数据持久化（运行时生成的图谱快照，不进库）---
+graph_store.json
+
+# --- macOS / 编辑器 ---
+.DS_Store
+.vscode/
+.idea/
+
+# --- 临时文件 ---
+*.log
+/tmp/
+
+# --- AI 工具缓存（防御性）---
+.anthropic/
+.cursor/
+.copilot/
+.aider/
+.continue/
