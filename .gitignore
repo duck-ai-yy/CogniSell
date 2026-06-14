@@ -1,12 +1,16 @@
 # --- agent prompt / skill 是 top 机密，永远本地 ---
 # 默认整个 .claude/ 不进 repo（覆盖 agents / skills / hooks 等）
 .claude/
+.codex/
+AGENTS.md
 
 # --- 项目宪法属开发 harness，不公开 ---
 CLAUDE.md
 
 # --- 内部协作 / 磨合记录，永远本地 ---
 tuning-log.md
+decisions.md
+docs/roadmap.md
 
 # --- Python ---
 .venv/

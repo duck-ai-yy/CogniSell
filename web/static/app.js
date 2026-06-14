@@ -1,532 +1,709 @@
-// Frontend shell: customer data assets on the left, agent confirmation cards on the right.
-// It stays API-only; GraphCore remains the SSOT behind /api/*.
-
-const STATE_LABEL = {
-  proposed: "Proposed",
-  confirmed: "Confirmed",
-  corrected: "Corrected",
-  retired: "Retired",
+const AGENT_COLORS = {
+  Scout: '#3b82f6', Enricher: '#10b981', Strategist: '#8b5cf6',
+  Champion: '#f59e0b', Skeptic: '#ef4444', Closer: '#6366f1',
+  Outreach: '#f97316', Digest: '#0d9488', Relationship: '#ec4899',
+  'Social Monitor': '#eab308', Copilot: '#6b7280',
 };
+const PERSON_COLORS = ['#0d9488','#6366f1','#8b5cf6','#ec4899','#f59e0b','#10b981','#3b82f6','#ef4444'];
+const COMPANY_COLORS = ['#1e293b','#334155','#1f2937','#27272a'];
 
-let graphSnapshot = { nodes: [], edges: [] };
-let selectedCustomerId = null;
+let cy = null;
+let SNAP = { nodes: [], edges: [] };
+const CLIENT_CARDS = [];
+let contactId = 'n_andreas';
+const updatedNodes = new Set();
 
-let _toastTimer = null;
-function toast(msg, isError) {
-  const el = document.getElementById("toast");
-  el.textContent = msg;
-  el.classList.toggle("toast-error", !!isError);
-  el.hidden = false;
-  clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => { el.hidden = true; }, 4200);
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function api(method, path, body) {
+  const opt = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opt.body = JSON.stringify(body);
+  const resp = await fetch(path, opt);
+  if (!resp.ok) {
+    let detail = 'HTTP ' + resp.status;
+    try { detail = (await resp.json()).detail || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  return resp.json();
 }
 
-async function api(path, opts) {
-  try {
-    const resp = await fetch(path, opts);
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok) {
-      const detail = data.detail || data.error || ("HTTP " + resp.status);
-      toast("Error: " + detail, true);
-      return null;
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { t.hidden = true; }, 3400);
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+}
+function labelize(s) {
+  return String(s).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+function relTime(t) {
+  const d = (Date.now() / 1000 - t) / 86400;
+  if (d < 1) return 'today';
+  return Math.round(d) + 'd ago';
+}
+
+function nameHash(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return Math.abs(h);
+}
+function personColor(name) { return PERSON_COLORS[nameHash(name) % PERSON_COLORS.length]; }
+function companyColor(name) { return COMPANY_COLORS[nameHash(name) % COMPANY_COLORS.length]; }
+
+function makeAvatarSvg(name, color, size) {
+  size = size || 120;
+  const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+  return 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="'+size+'" height="'+size+'">' +
+    '<circle cx="'+size/2+'" cy="'+size/2+'" r="'+size/2+'" fill="'+color+'"/>' +
+    '<text x="'+size/2+'" y="'+size/2+'" text-anchor="middle" dy=".35em" ' +
+    'font-family="Inter,system-ui,sans-serif" font-size="'+(size*0.38)+'" ' +
+    'fill="white" font-weight="600">'+initials+'</text></svg>'
+  );
+}
+function makeCompanySvg(name, color, size) {
+  size = size || 100;
+  const letter = name[0].toUpperCase();
+  return 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="'+size+'" height="'+size+'">' +
+    '<rect width="'+size+'" height="'+size+'" rx="'+(size*0.2)+'" fill="'+color+'"/>' +
+    '<text x="'+size/2+'" y="'+size/2+'" text-anchor="middle" dy=".36em" ' +
+    'font-family="Inter,system-ui,sans-serif" font-size="'+(size*0.4)+'" ' +
+    'fill="white" font-weight="700">'+letter+'</text></svg>'
+  );
+}
+
+const CONTACT_PREDICATES = new Set(['works_at', 'met_at', 'has_title']);
+
+function isColdContact(nodeId) {
+  const edges = SNAP.edges.filter(e =>
+    e.subject === nodeId && e.status !== 'retired' && CONTACT_PREDICATES.has(e.predicate));
+  if (edges.length === 0) return false;
+  const now = Date.now() / 1000;
+  const newest = Math.max(...edges.map(e => e.t));
+  return (now - newest) / 86400 > 85;
+}
+
+function getContactTemp(nodeId) {
+  const edges = SNAP.edges.filter(e =>
+    e.subject === nodeId && e.status !== 'retired' && CONTACT_PREDICATES.has(e.predicate));
+  if (edges.length === 0) return { label: 'New', cls: 'warm' };
+  const now = Date.now() / 1000;
+  const days = (now - Math.max(...edges.map(e => e.t))) / 86400;
+  if (days > 85) return { label: 'Cold · ' + Math.round(days) + 'd', cls: 'cold' };
+  if (days > 30) return { label: 'Warm · ' + Math.round(days) + 'd', cls: 'warm' };
+  return { label: 'Hot', cls: 'hot' };
+}
+
+function literalId(edge) { return 'lit_' + edge.id; }
+
+function buildElements(snap) {
+  const nodeIds = new Set(snap.nodes.map(n => n.id));
+  const nodes = [];
+  for (const n of snap.nodes) {
+    const d = { id: n.id, label: n.label, ntype: n.type, ...n.props };
+    if (n.type === 'person') {
+      const cold = isColdContact(n.id);
+      d.avatar = makeAvatarSvg(n.label, cold ? '#9ca3af' : personColor(n.label));
+      if (cold) d.isCold = true;
+      if (updatedNodes.has(n.id)) d.hasUpdate = true;
+    } else if (n.type === 'company') {
+      d.avatar = makeCompanySvg(n.label, companyColor(n.label));
     }
-    return data;
-  } catch (err) {
-    toast("Network error: " + err.message + " (server running?)", true);
-    return null;
+    nodes.push({ data: d });
   }
+  const edges = [];
+  for (const e of snap.edges) {
+    if (!nodeIds.has(e.subject)) continue;
+    let target = e.object;
+    if (!nodeIds.has(e.object)) {
+      target = literalId(e);
+      nodes.push({ data: {
+        id: target, label: String(e.object), ntype: 'literal',
+      }});
+    }
+    edges.push({ data: {
+      id: e.id, source: e.subject, target,
+      label: e.predicate.replace(/_/g, ' '),
+      status: e.status, confidence: e.confidence,
+      extractor: e.extractor, esource: e.source, t: e.t,
+    }});
+  }
+  return { nodes, edges };
+}
+
+const CY_STYLE = [
+  { selector: 'node', style: {
+    label: 'data(label)', color: '#52525b', 'font-size': '11px', 'font-weight': 500,
+    'font-family': 'Inter, system-ui, sans-serif',
+    'text-valign': 'bottom', 'text-margin-y': 8,
+    'text-max-width': '100px', 'text-wrap': 'wrap',
+    width: 44, height: 44,
+    'background-color': '#d4d4d8',
+    'border-width': 2, 'border-color': '#ffffff',
+  }},
+  { selector: 'node[ntype="person"]', style: {
+    'background-image': 'data(avatar)', 'background-fit': 'cover',
+    'background-color': '#e5e5e5',
+    shape: 'ellipse', width: 52, height: 52,
+  }},
+  { selector: 'node[ntype="company"]', style: {
+    'background-image': 'data(avatar)', 'background-fit': 'cover',
+    'background-color': '#334155',
+    shape: 'round-rectangle', width: 44, height: 44,
+    'font-size': '10px',
+  }},
+  { selector: 'node[ntype="topic"]', style: {
+    'background-color': '#f59e0b', shape: 'ellipse',
+    width: 26, height: 26, 'font-size': '10px', color: '#a1a1aa',
+  }},
+  { selector: 'node[ntype="literal"]', style: {
+    'background-color': '#f0f0ee', shape: 'round-rectangle',
+    width: 14, height: 14, 'font-size': '10px', color: '#a1a1aa',
+    'border-width': 1, 'border-color': '#e5e5e3',
+  }},
+  { selector: 'node[?isCold]', style: { opacity: 0.5 } },
+  { selector: 'node:selected', style: {
+    'border-color': '#0d9488', 'border-width': 3,
+  }},
+  { selector: 'node[?hasUpdate]', style: {
+    'border-color': '#ef4444', 'border-width': 3, 'border-opacity': 1,
+  }},
+  { selector: 'edge', style: {
+    'curve-style': 'bezier', 'target-arrow-shape': 'triangle',
+    label: 'data(label)', 'font-size': '9px', color: '#a1a1aa',
+    'font-family': 'Inter, system-ui, sans-serif',
+    'text-rotation': 'autorotate',
+    'text-background-color': '#f7f7f5', 'text-background-opacity': 0.9,
+    'text-background-padding': '2px',
+    width: 'mapData(confidence, 0, 1, 1, 4)',
+  }},
+  { selector: 'edge[status="proposed"]', style: {
+    'line-style': 'dashed', 'line-color': '#a1a1aa',
+    'target-arrow-color': '#a1a1aa', opacity: 0.55,
+  }},
+  { selector: 'edge[status="confirmed"]', style: {
+    'line-style': 'solid', 'line-color': '#0d9488',
+    'target-arrow-color': '#0d9488', opacity: 1,
+  }},
+  { selector: 'edge[status="corrected"]', style: {
+    'line-style': 'solid', 'line-color': '#d97706',
+    'target-arrow-color': '#d97706', opacity: 1,
+  }},
+  { selector: 'edge[status="retired"]', style: {
+    'line-style': 'dotted', 'line-color': '#d4d4d8',
+    'target-arrow-color': '#d4d4d8', opacity: 0.3,
+  }},
+];
+
+function runLayout() {
+  cy.layout({
+    name: 'cose', animate: true, animationDuration: 500,
+    padding: 50, nodeRepulsion: () => 10000, idealEdgeLength: () => 100, fit: true,
+  }).run();
 }
 
 async function loadGraph() {
-  const snapshot = await api("/api/graph");
-  if (!snapshot) return;
-  graphSnapshot = snapshot;
-  if (!selectedCustomerId) {
-    const primary = customers()[0];
-    selectedCustomerId = primary ? primary.id : null;
-  }
-  renderAssets();
-}
+  let snap;
+  try { snap = await api('GET', '/api/graph'); }
+  catch (err) { toast('Could not load graph: ' + err.message); return; }
+  SNAP = snap;
+  const els = buildElements(snap);
+  const wantIds = new Set(els.nodes.map(n => n.data.id));
 
-function nodesById() {
-  return new Map(graphSnapshot.nodes.map((n) => [n.id, n]));
-}
-
-function customers() {
-  return graphSnapshot.nodes
-    .filter((n) => n.type === "person" || n.type === "company")
-    .sort((a, b) => customerScore(b) - customerScore(a) || a.label.localeCompare(b.label));
-}
-
-function customerScore(node) {
-  return relatedEdges(node.id).length + (node.id === "n_andreas" ? 100 : 0);
-}
-
-function relatedEdges(nodeId) {
-  return graphSnapshot.edges.filter((e) => e.subject === nodeId || e.object === nodeId);
-}
-
-function trustedEdges(nodeId) {
-  return relatedEdges(nodeId).filter((e) => e.status !== "retired");
-}
-
-function resolveObject(edge) {
-  const node = nodesById().get(edge.object);
-  return node ? node.label : String(edge.object);
-}
-
-function resolveSubject(edge) {
-  const node = nodesById().get(edge.subject);
-  return node ? node.label : edge.subject;
-}
-
-function companyForPerson(personId) {
-  const map = nodesById();
-  const edge = graphSnapshot.edges.find((e) =>
-    e.subject === personId && e.predicate === "works_at" && e.status !== "retired");
-  return edge && map.get(edge.object) ? map.get(edge.object).label : "";
-}
-
-function titleForPerson(personId) {
-  const titleEdges = graphSnapshot.edges.filter((e) =>
-    e.subject === personId && e.predicate === "has_title" && e.status !== "retired");
-  const corrected = titleEdges.find((e) => e.status === "corrected");
-  return (corrected || titleEdges[0])?.object || nodesById().get(personId)?.props?.title || "";
-}
-
-function renderAssets() {
-  renderCustomerList();
-  renderCustomerDetail();
-  renderAssetSummary();
-}
-
-function renderAssetSummary() {
-  const activeEdges = graphSnapshot.edges.filter((e) => e.status !== "retired");
-  const pending = graphSnapshot.edges.filter((e) => e.status === "proposed").length;
-  document.getElementById("asset-summary").textContent =
-    `${graphSnapshot.nodes.length} nodes · ${activeEdges.length} active facts · ${pending} proposed`;
-}
-
-function renderCustomerList() {
-  const list = document.getElementById("customer-list");
-  const cs = customers();
-  list.innerHTML = "";
-  for (const customer of cs) {
-    const facts = trustedEdges(customer.id);
-    const proposed = facts.filter((e) => e.status === "proposed").length;
-    const btn = document.createElement("button");
-    btn.className = "customer-row" + (customer.id === selectedCustomerId ? " selected" : "");
-    btn.type = "button";
-    btn.innerHTML = `
-      <span class="avatar ${customer.type}">${customer.type === "person" ? "P" : "C"}</span>
-      <span class="customer-main">
-        <span class="customer-name">${escapeHtml(customer.label)}</span>
-        <span class="customer-meta">${escapeHtml(customerSubtitle(customer))}</span>
-      </span>
-      <span class="customer-badge">${facts.length}${proposed ? `/${proposed}` : ""}</span>
-    `;
-    btn.addEventListener("click", () => {
-      selectedCustomerId = customer.id;
-      renderAssets();
+  if (!cy) {
+    cy = cytoscape({
+      container: $('cy'),
+      elements: [...els.nodes, ...els.edges],
+      style: CY_STYLE,
+      minZoom: 0.3, maxZoom: 2.4, wheelSensitivity: 0.18,
     });
-    list.appendChild(btn);
-  }
-}
-
-function customerSubtitle(node) {
-  if (node.type === "person") {
-    return [titleForPerson(node.id), companyForPerson(node.id)].filter(Boolean).join(" · ") || "Person";
-  }
-  return node.props?.industry || node.props?.domain || "Company";
-}
-
-function renderCustomerDetail() {
-  const node = nodesById().get(selectedCustomerId);
-  const empty = document.getElementById("detail-empty");
-  const content = document.getElementById("detail-content");
-  if (!node) {
-    empty.hidden = false;
-    content.hidden = true;
+    cy.on('tap', 'node', ev => {
+      const ntype = ev.target.data('ntype');
+      if (ntype === 'person' || ntype === 'company') openDetail(ev.target.id());
+    });
+    cy.on('tap', 'edge', ev => openEdgeEditor(ev.target.data()));
+    runLayout();
+    updateRelCount();
     return;
   }
 
-  empty.hidden = true;
-  content.hidden = false;
-  document.getElementById("customer-kind").textContent = node.type;
-  document.getElementById("customer-title").textContent = node.label;
-  document.getElementById("customer-subtitle").textContent = customerSubtitle(node);
-
-  const facts = trustedEdges(node.id);
-  const avg = facts.length
-    ? Math.round((facts.reduce((sum, e) => sum + Number(e.confidence || 0), 0) / facts.length) * 100)
-    : 0;
-  const stale = facts.filter((e) => isStale(e)).length;
-  const proposed = facts.filter((e) => e.status === "proposed").length;
-
-  document.getElementById("metric-facts").textContent = String(facts.length);
-  document.getElementById("metric-confidence").textContent = `${avg}%`;
-  document.getElementById("metric-stale").textContent = String(stale);
-  document.getElementById("metric-proposed").textContent = String(proposed);
-  renderStatePills(facts);
-  renderFactList(node.id);
-  renderAuditList(node.id);
-}
-
-function renderStatePills(facts) {
-  const counts = { proposed: 0, confirmed: 0, corrected: 0, retired: 0 };
-  for (const e of relatedEdges(selectedCustomerId)) counts[e.status] = (counts[e.status] || 0) + 1;
-  const wrap = document.getElementById("state-pills");
-  wrap.innerHTML = Object.entries(counts)
-    .filter(([, count]) => count > 0)
-    .map(([state, count]) => `<span class="pill ${state}">${STATE_LABEL[state]} ${count}</span>`)
-    .join("");
-}
-
-function renderFactList(nodeId) {
-  const list = document.getElementById("fact-list");
-  const facts = trustedEdges(nodeId).sort((a, b) => statusRank(a.status) - statusRank(b.status));
-  if (!facts.length) {
-    list.innerHTML = `<div class="empty-inline">No active facts.</div>`;
-    return;
-  }
-  list.innerHTML = "";
-  for (const edge of facts) {
-    const item = document.createElement("div");
-    item.className = `fact-row ${edge.status}`;
-    item.innerHTML = `
-      <div class="fact-status"></div>
-      <div class="fact-copy">
-        <div class="fact-line">
-          <strong>${escapeHtml(resolveSubject(edge))}</strong>
-          <span>${escapeHtml(edge.predicate)}</span>
-          <strong>${escapeHtml(resolveObject(edge))}</strong>
-        </div>
-        <div class="fact-meta">
-          ${STATE_LABEL[edge.status]} · ${Math.round(edge.confidence * 100)}% · ${escapeHtml(edge.source)}
-        </div>
-      </div>
-      <div class="fact-actions">
-        ${edge.status === "proposed" ? `<button class="mini-btn" data-edge-confirm="${edge.id}">Confirm</button>` : ""}
-      </div>
-    `;
-    list.appendChild(item);
-  }
-  list.querySelectorAll("[data-edge-confirm]").forEach((btn) => {
-    btn.addEventListener("click", () => confirmFact(btn.dataset.edgeConfirm));
-  });
-}
-
-function renderAuditList(nodeId) {
-  const list = document.getElementById("audit-list");
-  const edges = relatedEdges(nodeId).sort((a, b) => Number(b.t) - Number(a.t));
-  if (!edges.length) {
-    list.innerHTML = `<div class="empty-inline">No audit events.</div>`;
-    return;
-  }
-  list.innerHTML = edges.map((edge) => `
-    <div class="audit-row">
-      <span class="audit-dot ${edge.status}"></span>
-      <span class="audit-main">
-        <strong>${escapeHtml(edge.predicate)}</strong>
-        <span>${escapeHtml(resolveObject(edge))}</span>
-      </span>
-      <span class="audit-meta">
-        ${escapeHtml(edge.extractor)} · ${escapeHtml(edge.source)}${edge.supersedes ? ` · supersedes ${escapeHtml(edge.supersedes)}` : ""}
-      </span>
-    </div>
-  `).join("");
-}
-
-function statusRank(status) {
-  return { proposed: 0, corrected: 1, confirmed: 2, retired: 3 }[status] ?? 9;
-}
-
-function isStale(edge) {
-  return edge.status !== "retired" && (Date.now() / 1000 - Number(edge.t || 0)) > 90 * 86400;
-}
-
-async function confirmFact(edgeId) {
-  const data = await api(`/api/edge/${edgeId}/confirm`, jsonPost({}));
-  if (!data) return;
-  toast("Fact confirmed.");
-  await loadGraph();
-  await refreshInbox();
-}
-
-// ---- inbox waterfall ----------------------------------------------------
-
-async function refreshInbox() {
-  const data = await api("/api/inbox");
-  if (!data) return;
-  renderInbox(data.cards || []);
-}
-
-function renderInbox(cards) {
-  const list = document.getElementById("inbox-list");
-  const empty = document.getElementById("inbox-empty");
-  document.getElementById("inbox-count").textContent = `${cards.length} pending`;
-  list.innerHTML = "";
-  empty.hidden = cards.length > 0;
-  for (const card of cards) list.appendChild(renderCard(card));
-}
-
-function renderCard(card) {
-  const el = document.createElement("article");
-  el.className = "agent-card";
-  el.innerHTML = `
-    <div class="card-top">
-      <span class="card-tag">${escapeHtml(card.node_type)}</span>
-      <span class="card-contact">${escapeHtml(contactName(card.contact_id))}</span>
-    </div>
-    <h3>${escapeHtml(card.title)}</h3>
-    ${card.body ? `<div class="card-body"></div>` : ""}
-    ${card.why ? `<div class="card-why">${escapeHtml(card.why)}</div>` : ""}
-  `;
-  if (card.body) {
-    const bodyEl = el.querySelector(".card-body");
-    if (card.node_type === "N4" && card.payload && card.payload.editable) {
-      const ta = document.createElement("textarea");
-      ta.className = "card-textarea";
-      ta.value = card.body;
-      bodyEl.appendChild(ta);
+  let added = 0;
+  cy.nodes().forEach(n => { if (!wantIds.has(n.id())) n.remove(); });
+  els.nodes.forEach(ne => {
+    const existing = cy.getElementById(ne.data.id);
+    if (existing.empty()) {
+      cy.add(ne); added++;
     } else {
-      bodyEl.textContent = card.body;
+      Object.entries(ne.data).forEach(([k, v]) => existing.data(k, v));
     }
+  });
+  cy.edges().remove();
+  cy.add(els.edges);
+  if (added > 0) runLayout();
+  updateRelCount();
+}
+
+function updateRelCount() {
+  const people = SNAP.nodes.filter(n => n.type === 'person').length;
+  $('rel-count').textContent = people;
+}
+
+function focusNode(nodeId) {
+  if (!cy) return;
+  const n = cy.getElementById(nodeId);
+  if (n.empty()) return;
+  cy.animate({ center: { eles: n }, zoom: 1.5 }, { duration: 400 });
+  n.select();
+}
+
+function openDetail(nodeId) {
+  const node = SNAP.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+
+  if (updatedNodes.has(nodeId)) {
+    updatedNodes.delete(nodeId);
+    const cyNode = cy.getElementById(nodeId);
+    if (!cyNode.empty()) cyNode.data('hasUpdate', undefined);
   }
-  el.appendChild(cardActions(card, el));
+
+  const props = node.props || {};
+  const activeEdges = SNAP.edges.filter(e => e.subject === nodeId && e.status !== 'retired');
+  const retiredEdges = SNAP.edges.filter(e => e.subject === nodeId && e.status === 'retired');
+  const cold = isColdContact(nodeId);
+  const temp = getContactTemp(nodeId);
+  const hasUp = updatedNodes.has(nodeId);
+  const color = node.type === 'person' ? personColor(node.label) : companyColor(node.label);
+  const avatarSvg = node.type === 'person'
+    ? makeAvatarSvg(node.label, cold ? '#9ca3af' : color, 120)
+    : makeCompanySvg(node.label, color, 120);
+
+  const companyEdge = activeEdges.find(e => e.predicate === 'works_at');
+  const companyNode = companyEdge ? SNAP.nodes.find(n => n.id === companyEdge.object) : null;
+
+  let html = '';
+  html += '<div class="detail-avatar' + (cold ? ' cold' : '') + (hasUp ? ' has-update' : '') + '">';
+  html += '<img src="' + avatarSvg + '" alt="' + esc(node.label) + '" /></div>';
+  html += '<div class="detail-name">' + esc(node.label) + '</div>';
+  if (props.title) html += '<div class="detail-role">' + esc(props.title) + '</div>';
+  if (companyNode) html += '<div class="detail-company">' + esc(companyNode.label) + '</div>';
+  if (node.type === 'person') {
+    html += '<div class="detail-temp ' + temp.cls + '">' + temp.label + '</div>';
+  }
+
+  const attrKeys = Object.entries(props).filter(([k]) => k !== 'title');
+  if (attrKeys.length) {
+    html += '<div class="detail-section"><div class="detail-section-title">Details</div>';
+    for (const [k, v] of attrKeys) {
+      if (!v) continue;
+      html += '<div class="detail-attr"><span class="k">' + labelize(k) + '</span><span class="v">' + esc(v) + '</span></div>';
+    }
+    html += '</div>';
+  }
+
+  if (activeEdges.length) {
+    html += '<div class="detail-section"><div class="detail-section-title">Knowledge</div>';
+    for (const e of activeEdges) {
+      const objNode = SNAP.nodes.find(n => n.id === e.object);
+      const obj = objNode ? objNode.label : e.object;
+      const isNew = e.source === 'social_monitor';
+      html += '<div class="detail-edge' + (isNew ? ' change-highlight' : '') + '">';
+      html += '<div class="rel">' + labelize(e.predicate) + ' &rarr; <b>' + esc(obj) + '</b></div>';
+      html += '<div class="meta"><span class="status-chip ' + e.status + '">' + e.status + '</span>';
+      html += '<span>' + Math.round(e.confidence * 100) + '%</span>';
+      html += '<span>&middot; ' + e.extractor + '</span>';
+      html += '<span>&middot; ' + relTime(e.t) + '</span></div></div>';
+    }
+    html += '</div>';
+  }
+
+  if (retiredEdges.length) {
+    html += '<div class="detail-section"><div class="detail-section-title">History (superseded)</div>';
+    for (const e of retiredEdges) {
+      const objNode = SNAP.nodes.find(n => n.id === e.object);
+      html += '<div class="detail-edge" style="opacity:.55">';
+      html += '<div class="rel">' + labelize(e.predicate) + ' &rarr; ' + esc(objNode ? objNode.label : e.object) + '</div>';
+      html += '<div class="meta"><span class="status-chip retired">retired</span><span>superseded</span></div></div>';
+    }
+    html += '</div>';
+  }
+
+  $('detail-content').innerHTML = html;
+  $('detail-panel').hidden = false;
+}
+
+$('detail-close').addEventListener('click', () => { $('detail-panel').hidden = true; });
+
+function openEdgeEditor(d) {
+  const objNode = SNAP.nodes.find(n => n.id === d.target);
+  const objLabel = objNode ? objNode.label : (d.target.startsWith('lit_') ? d.label : d.target);
+
+  let html = '';
+  html += '<div class="detail-section-title">Edit belief</div>';
+  html += '<div class="detail-name">' + labelize(d.label) + '</div>';
+  html += '<div class="meta" style="display:flex;gap:6px;margin:8px 0;font-size:11px;color:#a1a1aa">';
+  html += '<span class="status-chip ' + d.status + '">' + d.status + '</span>';
+  html += '<span>' + Math.round(d.confidence * 100) + '% &middot; ' + d.extractor + '</span></div>';
+  html += '<div class="edge-edit-row">';
+  html += '<input class="edge-edit-input" id="edge-edit-val" value="' + esc(objLabel) + '" />';
+  html += '<button class="edge-edit-btn" id="edge-save-btn">Correct</button></div>';
+  html += '<div class="card-hint" style="margin-top:10px">Correcting retires the old belief and records a new one that supersedes it.</div>';
+
+  $('detail-content').innerHTML = html;
+  $('detail-panel').hidden = false;
+
+  $('edge-save-btn').onclick = async () => {
+    const val = $('edge-edit-val').value.trim();
+    if (!val) return;
+    try {
+      const res = await api('POST', '/api/edge/' + d.id + '/correct', { new_object: val });
+      $('detail-panel').hidden = true;
+      await loadGraph();
+      toast(res.recomputed_catchup
+        ? 'Belief corrected · catch-up suggestion recomputed.'
+        : 'Belief corrected · old retired, new edge supersedes it.');
+    } catch (err) { toast('Could not correct: ' + err.message); }
+  };
+}
+
+// ── Agent Activity Stream ──
+
+function showActivity() {
+  $('activity-stream').hidden = false;
+  $('empty-state').style.display = 'none';
+}
+
+let _typeCancel = new WeakMap();
+
+async function typeText(el, text, speed) {
+  speed = speed || 16;
+  const token = {};
+  _typeCancel.set(el, token);
+  el.textContent = '';
+  for (let i = 0; i < text.length; i++) {
+    if (_typeCancel.get(el) !== token) return;
+    el.textContent += text[i];
+    if (i % 3 === 0) await sleep(speed);
+  }
+}
+
+function actStream(agent, text) {
+  showActivity();
+  const row = document.createElement('div');
+  row.className = 'stream-item';
+  const color = AGENT_COLORS[agent] || '#6b7280';
+  row.innerHTML =
+    '<span class="agent-dot" style="background:' + color + '"></span>' +
+    '<span class="agent-label">' + agent + '</span>' +
+    '<span class="agent-text"></span>' +
+    '<span class="agent-status"><span class="spinner-sm"></span></span>';
+  $('stream-items').appendChild(row);
+  scrollRight();
+  typeText(row.querySelector('.agent-text'), text);
+  return row;
+}
+
+function actDone(row, result) {
+  const textEl = row.querySelector('.agent-text');
+  _typeCancel.set(textEl, null);
+  row.querySelector('.agent-status').innerHTML = '<span class="check-mark">✓</span>';
+  if (result) textEl.textContent = result;
+}
+
+function scrollRight() {
+  const s = $('right-scroll');
+  s.scrollTop = s.scrollHeight;
+}
+
+// ── Decision Cards ──
+
+function pushCard(card) {
+  CLIENT_CARDS.push(card);
+  renderCards();
+}
+function removeCard(id) {
+  const i = CLIENT_CARDS.findIndex(c => c.id === id);
+  if (i >= 0) CLIENT_CARDS.splice(i, 1);
+  renderCards();
+}
+
+async function refreshServerCards() {
+  let serverCards = [];
+  try { serverCards = (await api('GET', '/api/inbox')).cards || []; } catch (_) {}
+  return serverCards.filter(c => c.node_type !== 'N2' && c.node_type !== 'N3');
+}
+
+async function renderCards() {
+  const server = await refreshServerCards();
+  const all = [...CLIENT_CARDS, ...server];
+  const area = $('cards-area');
+  area.innerHTML = '';
+  for (const c of all) area.appendChild(buildCardEl(c));
+  scrollRight();
+}
+
+const BADGE_MAP = {
+  FLOW_CONFIRM: ['Confirm', 'confirm'],
+  FLOW_MEET: ['Details', 'details'],
+  N3: ['Strategy', 'strategy'],
+  N4: ['Draft', 'draft'],
+  N6: ['Warm-up', 'warmup'],
+  N8: ['Signal', 'signal'],
+};
+
+function buildCardEl(c) {
+  const el = document.createElement('div');
+  el.className = 'decision-card';
+  const [badgeText, badgeCls] = BADGE_MAP[c.node_type] || ['Review', 'details'];
+
+  let body = '';
+  let actions = '';
+
+  if (c.node_type === 'FLOW_CONFIRM') {
+    body = '<div class="card-body">' + esc(c.body) + '</div>';
+    actions = '<button class="btn btn-primary" data-act="confirm-contact">Confirm &amp; file</button>' +
+              '<button class="btn btn-ghost" data-act="dismiss">Not now</button>';
+  } else if (c.node_type === 'FLOW_MEET') {
+    body = '<div class="card-field-row">' +
+      '<input class="card-input" id="meet-when" placeholder="When? e.g. Hannover Messe, April" />' +
+      '<input class="card-input" id="meet-where" placeholder="Where? e.g. Hall 6, Booth C24" /></div>';
+    actions = '<button class="btn btn-primary" data-act="save-meet">Save to record</button>';
+  } else if (c.node_type === 'N4') {
+    body = '<textarea class="card-textarea" id="mail-' + c.id + '">' + esc(c.body) + '</textarea>';
+    actions = '<button class="btn btn-primary" data-act="send">Approve &amp; send</button>' +
+              '<button class="btn btn-ghost" data-act="dismiss">Discard</button>';
+  } else if (c.node_type === 'N6') {
+    body = '<div class="card-body">' + esc(c.body) + '</div>';
+    actions = '<button class="btn btn-primary" data-act="approve-warmup">Approve warm-up</button>' +
+              '<button class="btn btn-ghost" data-act="dismiss">Dismiss</button>';
+  } else if (c.node_type === 'N8') {
+    body = '<div class="card-body">' + esc(c.body) + '</div>';
+    actions = '<button class="btn btn-primary" data-act="approve-signal">Follow up</button>' +
+              '<button class="btn btn-ghost" data-act="dismiss">Dismiss</button>';
+  } else {
+    body = '<div class="card-body">' + esc(c.body || '') + '</div>';
+    actions = '<button class="btn btn-primary" data-act="approve">Approve</button>' +
+              '<button class="btn btn-ghost" data-act="dismiss">Dismiss</button>';
+  }
+
+  el.innerHTML =
+    '<div class="card-header"><span class="card-badge ' + badgeCls + '">' + badgeText + '</span>' +
+    '<span class="card-title">' + esc(c.title) + '</span></div>' +
+    body +
+    (c.why ? '<div class="card-hint">' + esc(c.why) + '</div>' : '') +
+    '<div class="card-actions">' + actions + '</div>';
+
+  el.querySelectorAll('button[data-act]').forEach(b =>
+    b.addEventListener('click', () => onCardAction(c, b.dataset.act)));
   return el;
 }
 
-function contactName(contactId) {
-  return contactId && nodesById().get(contactId) ? nodesById().get(contactId).label : "agent";
-}
-
-function cardActions(card, cardEl) {
-  const wrap = document.createElement("div");
-  wrap.className = "card-actions";
-  const add = (label, fn, cls) => {
-    const b = document.createElement("button");
-    b.className = "btn " + (cls || "");
-    b.textContent = label;
-    b.addEventListener("click", fn);
-    wrap.appendChild(b);
-  };
-
-  switch (card.node_type) {
-    case "N2":
-      add("Confirm", () => resolveCard(card.id, "confirm", {}));
-      add("Correct", () => {
-        const v = prompt("Corrected value:", card.payload.current || "");
-        if (v != null && v.trim()) resolveCard(card.id, "correct", { new_object: v.trim() });
-      }, "ghost");
-      break;
-    case "N3":
-      (card.options || []).forEach((opt) => {
-        add(opt.length > 30 ? opt.slice(0, 30) + "..." : opt,
-          () => resolveCard(card.id, "choose", { choice: opt }), "ghost");
-      });
-      break;
-    case "N4":
-      add("Send", () => {
-        const ta = cardEl.querySelector(".card-textarea");
-        sendMail(card.contact_id, ta ? ta.value : card.body);
-      });
-      break;
-    case "N5":
-      add("Approve", () => resolveCard(card.id, "approve", {}));
-      add("Correct", () => {
-        const v = prompt("Corrected value:", card.body || "");
-        if (v != null && v.trim()) resolveCard(card.id, "correct", { new_object: v.trim() });
-      }, "ghost");
-      break;
-    case "N6":
-      add("Approve", () => resolveCard(card.id, "approve", {}));
-      break;
-    default:
-      add("Confirm", () => resolveCard(card.id, "confirm", {}));
-  }
-  return wrap;
-}
-
-async function resolveCard(cardId, action, payload) {
-  const data = await api(`/api/inbox/${cardId}/resolve`, jsonPost({ action, payload }));
-  if (!data) return;
-  toast(data.note || "Done.");
-  await loadGraph();
-  await refreshInbox();
-}
-
-// ---- agent actions ------------------------------------------------------
-
-async function actScan() {
-  const data = await api("/api/scan", jsonPost({}));
-  if (!data) return;
-  toast(`Scanned ${data.candidates.length} contact; ${data.cards_added} task added.`);
-  openCandidateModal(data.candidates);
-  await loadGraph();
-  await refreshInbox();
-}
-
-async function actStrategy() {
-  const data = await api("/api/strategy", jsonPost({ contact_id: "n_andreas" }));
-  if (!data) return;
-  toast("Strategy card added.");
-  const draft = await api("/api/mail/compose", jsonPost({ contact_id: "n_andreas" }));
-  if (draft) toast("Outreach draft added.");
-  await refreshInbox();
-}
-
-async function sendMail(contactId, body) {
-  const data = await api("/api/mail/send", jsonPost({ contact_id: contactId, body }));
-  if (!data) return;
-  toast(`${data.receipt} · ${data.cards_added} task(s) added`);
-  await loadGraph();
-  await refreshInbox();
-}
-
-async function actCatchup() {
-  const data = await api("/api/catchup/scan", jsonPost({}));
-  if (!data) return;
-  toast(`Catch-up scan: ${data.stale.length} stale tie(s).`);
-  await refreshInbox();
-}
-
-// ---- candidate picker ---------------------------------------------------
-
-function openCandidateModal(candidates) {
-  const modal = document.getElementById("candidate-modal");
-  const list = document.getElementById("candidate-list");
-  list.innerHTML = "";
-  candidates.forEach((c) => {
-    const row = document.createElement("label");
-    row.className = "cand-row";
-    row.innerHTML = `<input type="checkbox" value="${c.node_id}" checked />
-      <span><b>${escapeHtml(c.label)}</b><small>${escapeHtml(c.company)}</small></span>`;
-    list.appendChild(row);
-  });
-  modal.hidden = false;
-}
-
-document.getElementById("candidate-cancel").addEventListener("click", () => {
-  document.getElementById("candidate-modal").hidden = true;
-});
-
-document.getElementById("candidate-confirm").addEventListener("click", async () => {
-  const ids = [...document.querySelectorAll("#candidate-list input:checked")].map((i) => i.value);
-  document.getElementById("candidate-modal").hidden = true;
-  if (ids.length === 0) { toast("No contact selected."); return; }
-  const data = await api("/api/scan/select", jsonPost({ ids }));
-  if (!data) return;
-  selectedCustomerId = ids[0];
-  toast(`Kept ${ids.length} contact.`);
-  await loadGraph();
-  await refreshInbox();
-});
-
-// ---- skills -------------------------------------------------------------
-
-async function loadSkills() {
-  const data = await api("/api/skills");
-  if (!data) return;
-  const panel = document.getElementById("skills-panel");
-  panel.innerHTML = "";
-  data.skills.forEach((s) => {
-    const row = document.createElement("div");
-    row.className = "skill-row";
-    row.innerHTML = `<span class="skill-name">${escapeHtml(s.label)}</span>
-      <span class="skill-desc">${escapeHtml(s.desc)}</span>`;
-    const btn = document.createElement("button");
-    btn.className = "btn ghost skill-toggle " + (s.enabled ? "on" : "off");
-    btn.textContent = s.enabled ? "On" : "Off";
-    btn.addEventListener("click", async () => {
-      const r = await api(`/api/skills/${s.name}/toggle`, jsonPost({}));
-      if (r) { toast(`${s.label} ${r.skill.enabled ? "enabled" : "disabled"}.`); loadSkills(); }
-    });
-    row.appendChild(btn);
-    panel.appendChild(row);
-  });
-}
-
-document.getElementById("skills-btn").addEventListener("click", () => {
-  const p = document.getElementById("skills-panel");
-  p.hidden = !p.hidden;
-  if (!p.hidden) loadSkills();
-});
-
-// ---- voice --------------------------------------------------------------
-
-async function sendVoice(transcript) {
-  const data = await api("/api/voice", jsonPost({ transcript }));
-  if (!data) return;
-  const msg = (data.result && data.result.message) || "Done.";
-  toast(`Voice: ${msg}`);
-  if (data.action === "correct_company" && data.result.needs_input) {
-    const v = prompt("Corrected company name:", "");
-    if (v != null && v.trim()) {
-      const r = await api(`/api/edge/${data.result.edge_id}/correct`, jsonPost({ new_object: v.trim() }));
-      if (r) toast("Company corrected.");
+async function onCardAction(card, act) {
+  try {
+    if (act === 'dismiss') { removeCard(card.id); return; }
+    if (act === 'confirm-contact') return confirmContact(card);
+    if (act === 'save-meet') return saveMeet();
+    if (act === 'send') {
+      const textarea = document.getElementById('mail-' + card.id);
+      return sendMail(card, textarea ? textarea.value : card.body);
     }
-  }
-  await loadGraph();
-  await refreshInbox();
+    if (act === 'approve-warmup' || act === 'approve-signal' || act === 'approve') {
+      await api('POST', '/api/inbox/' + card.id + '/resolve', { action: 'approve', payload: {} });
+      toast('Approved.');
+      await loadGraph();
+      await renderCards();
+    }
+  } catch (err) { toast('Action failed: ' + err.message); }
 }
+
+// ── Complete Demo Flow ──
+
+async function scanFlow() {
+  $('empty-state').style.display = 'none';
+
+  const r1 = actStream('Scout', 'Reading business card via OCR...');
+  await sleep(1000);
+  let scan;
+  try { scan = await api('POST', '/api/scan'); }
+  catch (err) { actDone(r1, 'Scan failed: ' + err.message); return; }
+  const cand = (scan.candidates || [])[0] || {};
+  contactId = cand.node_id || contactId;
+  actDone(r1, 'Found: ' + (cand.label || 'contact') + ' · ' + (cand.company || ''));
+  await loadGraph();
+  focusNode(contactId);
+
+  await sleep(400);
+  const r2 = actStream('Enricher', 'Matching company & pulling public profiles...');
+  await sleep(1100);
+  actDone(r2, 'Linked to ' + (cand.company || 'company') + ' · Steel manufacturing');
+  await loadGraph();
+
+  await sleep(300);
+  pushCard({
+    id: 'flow_confirm', node_type: 'FLOW_CONFIRM',
+    title: (cand.label || 'New contact') + ' — ' + (cand.company || ''),
+    body: 'Scanned the card and created a provisional node on the left. The dashed edge means it\'s proposed — confirm to file it as a trusted contact.',
+    why: 'Nothing is trusted until you confirm. The node stays proposed on the graph until then.',
+  });
+}
+
+async function confirmContact(card) {
+  removeCard(card.id);
+  const r = actStream('Scout', 'Filing contact & enriching company facts...');
+  await api('POST', '/api/scan/select', { ids: [contactId] });
+  await sleep(800);
+  actDone(r, 'Filed Andreas Vogel · +4 enriched facts');
+  await loadGraph();
+  focusNode(contactId);
+
+  await sleep(300);
+  pushCard({
+    id: 'flow_meet', node_type: 'FLOW_MEET',
+    title: 'Add meeting details while they\'re fresh',
+    why: 'Where and when you met sharpens every future suggestion.',
+  });
+}
+
+async function saveMeet() {
+  const when = ($('meet-when') ? $('meet-when').value : '') || 'Hannover Messe, April';
+  const where = ($('meet-where') ? $('meet-where').value : '') || 'Hall 6, Booth C24';
+  removeCard('flow_meet');
+  const r = actStream('Copilot', 'Saving meeting context to the record...');
+  await api('POST', '/api/contact/' + contactId + '/meet', { when, where });
+  await sleep(700);
+  actDone(r, 'Recorded: met at ' + where);
+  await loadGraph();
+  focusNode(contactId);
+
+  await sleep(500);
+  draftFollowup();
+}
+
+async function draftFollowup() {
+  const rs = actStream('Strategist', 'Debating approach — Champion · Skeptic · Closer...');
+  let strat;
+  try { strat = await api('POST', '/api/strategy', { contact_id: contactId }); }
+  catch (err) { actDone(rs, 'Strategy failed'); return; }
+
+  const roles = (strat.debate && strat.debate.roles) || [];
+  await sleep(1000);
+  actDone(rs, 'Converged: ' + ((strat.debate.strategy_card || {}).approach_angle || '').slice(0, 60) + '...');
+
+  for (const role of roles) {
+    const rr = actStream(role.role, role.stance);
+    await sleep(500);
+    actDone(rr, role.stance);
+  }
+
+  await sleep(400);
+  const rc = actStream('Outreach', 'Drafting follow-up email using graph context...');
+  await api('POST', '/api/mail/compose', { contact_id: contactId });
+  await sleep(900);
+  actDone(rc, 'Draft ready for your review');
+  await renderCards();
+}
+
+async function sendMail(card, body) {
+  removeCard(card.id);
+  const r = actStream('Outreach', 'Sending email & logging the thread...');
+  await api('POST', '/api/mail/send', { contact_id: contactId, body });
+  await sleep(800);
+  actDone(r, 'Sent ✓');
+
+  const rd = actStream('Digest', 'Extracting commitments from the thread...');
+  await sleep(900);
+  actDone(rd, 'Captured next steps into the graph');
+  await loadGraph();
+  await renderCards();
+
+  await sleep(800);
+  proactiveSweep();
+}
+
+async function proactiveSweep() {
+  const r1 = actStream('Social Monitor', 'Scanning tracked contacts\' social feeds...');
+  await sleep(1200);
+  await api('POST', '/api/signals/scan');
+  actDone(r1, 'Detected: Nordic Drives AB may be going to tender');
+  await renderCards();
+
+  await sleep(600);
+  const r2 = actStream('Relationship', 'Scanning your book for cooling relationships...');
+  await api('POST', '/api/catchup/scan');
+  await sleep(1000);
+  actDone(r2, 'Found: Markus Brandt — 92 days since last contact');
+  await loadGraph();
+  await renderCards();
+
+  toast('Two items may need you — see the cards below.');
+
+  await sleep(2500);
+  jobChangeFlow();
+}
+
+async function jobChangeFlow() {
+  const r1 = actStream('Social Monitor', 'Detected job change: Henrik Sørensen...');
+  await sleep(1200);
+  try {
+    await api('POST', '/api/signals/job-change', {
+      contact_id: 'n_noise_p3',
+      new_company_name: 'Siemens Energy AG',
+    });
+  } catch (err) { actDone(r1, 'Job change detection failed'); return; }
+  actDone(r1, 'Henrik moved: Aalborg Maskin → Siemens Energy AG');
+
+  updatedNodes.add('n_noise_p3');
+  await loadGraph();
+  focusNode('n_noise_p3');
+  toast('Henrik Sørensen changed jobs — tap the red-bordered node to review.');
+}
+
+// ── Voice ──
 
 function setupVoice() {
-  const btn = document.getElementById("voice-btn");
-  const fallback = document.getElementById("voice-fallback");
+  const mic = $('mic-btn');
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) {
-    fallback.hidden = false;
-    btn.addEventListener("click", () =>
-      toast("Speech recognition unavailable; use text command.", true));
-    return;
+  if (SR) {
+    const rec = new SR();
+    rec.lang = 'en-US'; rec.interimResults = false;
+    mic.addEventListener('click', () => {
+      try { rec.start(); mic.classList.add('listening'); } catch (_) {}
+    });
+    rec.onresult = ev => {
+      mic.classList.remove('listening');
+      handleVoice(ev.results[0][0].transcript);
+    };
+    rec.onerror = () => { mic.classList.remove('listening'); toast('Mic unavailable — type the command instead.'); };
+    rec.onend = () => mic.classList.remove('listening');
+  } else {
+    mic.addEventListener('click', () => toast('Voice needs Chrome/Edge — type the command instead.'));
   }
-  const recog = new SR();
-  recog.lang = "en-US";
-  recog.interimResults = false;
-  recog.maxAlternatives = 1;
-  btn.addEventListener("click", () => {
-    try { recog.start(); toast("Listening..."); }
-    catch (e) { fallback.hidden = false; toast("Mic error: " + e.message, true); }
+  $('send-btn').addEventListener('click', () => {
+    const v = $('input-text').value.trim();
+    if (v) handleVoice(v);
   });
-  recog.onresult = (ev) => sendVoice(ev.results[0][0].transcript);
-  recog.onerror = (ev) => {
-    fallback.hidden = false;
-    toast("Voice error: " + ev.error, true);
-  };
-}
-
-document.getElementById("voice-send").addEventListener("click", () => {
-  const input = document.getElementById("voice-text");
-  const t = input.value.trim();
-  if (t) sendVoice(t);
-  input.value = "";
-});
-
-// ---- helpers ------------------------------------------------------------
-
-function jsonPost(body) {
-  return { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-document.querySelectorAll("[data-act]").forEach((b) => {
-  b.addEventListener("click", () => {
-    const act = b.dataset.act;
-    if (act === "scan") actScan();
-    else if (act === "strategy") actStrategy();
-    else if (act === "catchup") actCatchup();
+  $('input-text').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && e.target.value.trim()) handleVoice(e.target.value);
   });
-});
-
-async function init() {
-  await loadGraph();
-  await refreshInbox();
-  setupVoice();
 }
 
-init();
+async function handleVoice(transcript) {
+  $('input-text').value = '';
+  try {
+    const res = await api('POST', '/api/voice', { transcript });
+    toast(res.result && res.result.message ? res.result.message : 'Done.');
+    if (res.result && res.result.graph_changed) await loadGraph();
+    await renderCards();
+  } catch (err) { toast('Voice failed: ' + err.message); }
+}
+
+// ── Init ──
+$('scan-btn').addEventListener('click', scanFlow);
+setupVoice();
+loadGraph();

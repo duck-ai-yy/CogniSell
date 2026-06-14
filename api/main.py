@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from graph import GraphCore
+from graph import GraphCore, Node, Edge
 from seed import seed_data
 from sync.router import PrefStore
 from skills import scout, strategist, outreach, digest, relationship, registry, cards
@@ -96,8 +96,18 @@ class CorrectBody(BaseModel):
     new_object: str
 
 
+class MeetBody(BaseModel):
+    when: str
+    where: str
+
+
 class VoiceBody(BaseModel):
     transcript: str
+
+
+class JobChangeBody(BaseModel):
+    contact_id: str
+    new_company_name: str
 
 
 # --------------------------------------------------------------------------
@@ -190,16 +200,58 @@ def resolve(card_id: str, body: ResolveBody) -> dict:
         note = f"Remembered approach angle: {choice}."
 
     elif action == "approve":
-        # Approve-and-act cards (e.g. a commitment): confirm the underlying edge.
-        if edge_id:
-            graph.confirm(edge_id)
-        note = "Action approved; underlying fact confirmed."
+        if card.get("node_type") == "N8":
+            # Signal card: capture the detected opportunity into the graph as a
+            # confirmed lead the human chose to act on.
+            company_id = card.get("payload", {}).get("company_id")
+            if company_id:
+                e = graph.propose(Edge(
+                    subject=company_id, predicate="signal_tender",
+                    object="Conveyor-systems procurement (rumored)",
+                    source="social", extractor="LLM", confidence=0.6, status="proposed",
+                ))
+                graph.confirm(e.id)
+            note = "Signal captured into the graph; follow-up flagged."
+        else:
+            # Approve-and-act cards (e.g. a commitment): confirm the underlying edge.
+            if edge_id:
+                graph.confirm(edge_id)
+            note = "Action approved; underlying fact confirmed."
 
     else:
         raise HTTPException(status_code=400, detail=f"unknown action: {action}")
 
     INBOX.remove(card)
     return {"ok": True, "graph_changed": True, "note": note}
+
+
+# --------------------------------------------------------------------------
+# Scenario ① cont. — meeting details captured onto the left-side record
+# --------------------------------------------------------------------------
+
+@app.post("/api/contact/{contact_id}/meet")
+def contact_meet(contact_id: str, body: MeetBody) -> dict:
+    """Record where/when we met onto the contact's left-side record.
+
+    Writes to node props AND lays down a confirmed `met_at` edge to an event
+    node, so the meeting shows up on the graph (the left panel's job: who, and
+    how connected). Human-entered => confirmed, full confidence.
+    """
+    node = graph.get_node(contact_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail=f"contact not found: {contact_id}")
+    node.props["met_when"] = body.when
+    node.props["met_where"] = body.where
+    graph.upsert_node(node)
+
+    event_id = "n_event_meet"
+    graph.upsert_node(Node(id=event_id, type="topic", label=body.where))
+    edge = graph.propose(Edge(
+        subject=contact_id, predicate="met_at", object=event_id,
+        source="user", extractor="human", confidence=1.0, status="proposed",
+    ))
+    graph.confirm(edge.id)
+    return {"ok": True, "graph_changed": True, "event_id": event_id, "edge_id": edge.id}
 
 
 # --------------------------------------------------------------------------
@@ -284,8 +336,13 @@ def catchup_scan() -> dict:
     _require_skill("relationship")
     stale = relationship.scan_stale(graph, NOW)
     added = []
+    seen: set[str] = set()
     for item in stale["stale"]:
         cid = item["contact_id"]
+        # One warm-up per contact even if several of their edges went cold.
+        if cid in seen:
+            continue
+        seen.add(cid)
         sug = relationship.catchup_suggest(graph, cid, NOW)
         if not sug.get("ok"):
             continue
@@ -325,6 +382,23 @@ def edge_correct(edge_id: str, body: CorrectBody) -> dict:
         "superseded": edge_id,
         "recomputed_catchup": recomputed,
     }
+
+
+@app.post("/api/signals/scan")
+def signals_scan() -> dict:
+    """Proactive signal: a tracked contact posted something that may mean a
+    tender is opening. Surfaces an N8 card for the human to act on or dismiss."""
+    card = cards.make_card(
+        "N8",
+        title="Nordic Drives AB may be going to tender",
+        body="Petra Lindqvist (Nordic Drives AB) just posted about an upcoming "
+             "conveyor-systems procurement. An RFQ window may be opening.",
+        why="Detected from a new social post; matches your conveyor-drive focus.",
+        contact_id="n_noise_p2",
+        payload={"company_id": "n_noise_c2"},
+    )
+    _push_cards([card])
+    return {"ok": True, "card_added": card["id"]}
 
 
 @app.post("/api/edge/{edge_id}/confirm")
@@ -388,6 +462,53 @@ def skills_toggle(name: str) -> dict:
     except KeyError:
         raise HTTPException(status_code=404, detail=f"unknown skill: {name}")
     return {"ok": True, "skill": updated}
+
+
+# --------------------------------------------------------------------------
+# Contact detail + job-change signal
+# --------------------------------------------------------------------------
+
+@app.get("/api/contact/{contact_id}")
+def get_contact(contact_id: str) -> dict:
+    node = graph.get_node(contact_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail=f"contact not found: {contact_id}")
+    edges = graph.query(subject=contact_id)
+    active = [e.to_dict() for e in edges if e.status != "retired"]
+    history = [e.to_dict() for e in edges if e.status == "retired"]
+    return {"node": node.to_dict(), "edges": active, "history": history}
+
+
+@app.post("/api/signals/job-change")
+def job_change(body: JobChangeBody) -> dict:
+    node = graph.get_node(body.contact_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail=f"contact not found: {body.contact_id}")
+    # Find the current works_at edge
+    target_edge = None
+    for e in graph.query(subject=body.contact_id, predicate="works_at"):
+        if e.status in ("proposed", "confirmed", "corrected"):
+            target_edge = e
+            break
+    if target_edge is None:
+        raise HTTPException(status_code=400, detail="no active works_at edge to update")
+    # Create new company node
+    new_company_id = f"n_company_{body.new_company_name.lower().replace(' ', '_')[:12]}"
+    graph.upsert_node(Node(id=new_company_id, type="company", label=body.new_company_name))
+    # Correct the old edge (old -> retired, new -> corrected with supersedes)
+    new_edge = graph.correct(target_edge.id, {
+        "object": new_company_id,
+        "extractor": "LLM",
+        "confidence": 0.85,
+        "source": "social_monitor"
+    })
+    return {
+        "ok": True,
+        "graph_changed": True,
+        "new_edge_id": new_edge.id,
+        "old_edge_id": target_edge.id,
+        "new_company_id": new_company_id
+    }
 
 
 # --------------------------------------------------------------------------
