@@ -79,6 +79,18 @@ function makeCompanySvg(name, color, size) {
   );
 }
 
+const PERSON_AVATARS = {
+  "Markus Brandt": "/static/avatars/markus_brandt.jpg",
+  "Petra Lindqvist": "/static/avatars/petra_lindqvist.jpg",
+  "Henrik Sørensen": "/static/avatars/henrik_sorensen.jpg",
+  "Claudia Reiter": "/static/avatars/claudia_reiter.jpg",
+  "Andreas Vogel": "/static/avatars/andreas_vogel.jpg"
+};
+
+const PERSON_GRAY_AVATARS = {
+  "Markus Brandt": "/static/avatars/markus_brandt_gray.jpg"
+};
+
 const CONTACT_PREDICATES = new Set(['works_at', 'met_at', 'has_title']);
 
 function isColdContact(nodeId) {
@@ -101,6 +113,34 @@ function getContactTemp(nodeId) {
   return { label: 'Hot', cls: 'hot' };
 }
 
+function getContactStage(nodeId) {
+  const node = SNAP.nodes.find(n => n.id === nodeId);
+  if (!node || node.type !== 'person') return null;
+
+  if (nodeId === 'n_noise_p1' || nodeId === 'n_noise_p2' || nodeId === 'n_noise_p4') {
+    return { index: 3, name: 'Maintain' };
+  }
+  if (nodeId === 'n_noise_p3') {
+    return { index: 3, name: 'Maintain' };
+  }
+
+  const activeEdges = SNAP.edges.filter(e => e.subject === nodeId && e.status !== 'retired');
+  if (activeEdges.length === 0 || activeEdges.every(e => e.status === 'proposed')) {
+    return { index: 0, name: 'Lead' };
+  }
+
+  const hasOpportunity = activeEdges.some(e => 
+    e.predicate === 'committed_to' || 
+    e.predicate === 'next_step'
+  );
+
+  if (hasOpportunity) {
+    return { index: 2, name: 'Opportunity' };
+  }
+
+  return { index: 1, name: 'Prospect' };
+}
+
 function literalId(edge) {
   // Use a hash-like or encoded ID based on the literal value so identical literals map to the same node
   let str = String(edge.object);
@@ -116,7 +156,11 @@ function buildElements(snap) {
     const d = { id: n.id, label: n.label, ntype: n.type, ...n.props };
     if (n.type === 'person') {
       const cold = isColdContact(n.id);
-      d.avatar = makeAvatarSvg(n.label, cold ? '#9ca3af' : personColor(n.label));
+      if (PERSON_AVATARS[n.label]) {
+        d.avatar = (cold && PERSON_GRAY_AVATARS[n.label]) ? PERSON_GRAY_AVATARS[n.label] : PERSON_AVATARS[n.label];
+      } else {
+        d.avatar = makeAvatarSvg(n.label, cold ? '#9ca3af' : personColor(n.label));
+      }
       if (cold) d.isCold = true;
       if (updatedNodes.has(n.id)) d.hasUpdate = true;
     } else if (n.type === 'company') {
@@ -302,24 +346,49 @@ function openDetail(nodeId) {
   const activeEdges = SNAP.edges.filter(e => e.subject === nodeId && e.status !== 'retired');
   const retiredEdges = SNAP.edges.filter(e => e.subject === nodeId && e.status === 'retired');
   const cold = isColdContact(nodeId);
-  const temp = getContactTemp(nodeId);
   const hasUp = updatedNodes.has(nodeId);
   const color = node.type === 'person' ? personColor(node.label) : companyColor(node.label);
-  const avatarSvg = node.type === 'person'
-    ? makeAvatarSvg(node.label, cold ? '#9ca3af' : color, 120)
-    : makeCompanySvg(node.label, color, 120);
+  let avatarUrl;
+  if (node.type === 'person') {
+    if (PERSON_AVATARS[node.label]) {
+      avatarUrl = (cold && PERSON_GRAY_AVATARS[node.label]) ? PERSON_GRAY_AVATARS[node.label] : PERSON_AVATARS[node.label];
+    } else {
+      avatarUrl = makeAvatarSvg(node.label, cold ? '#9ca3af' : color, 120);
+    }
+  } else {
+    avatarUrl = makeCompanySvg(node.label, color, 120);
+  }
 
   const companyEdge = activeEdges.find(e => e.predicate === 'works_at');
   const companyNode = companyEdge ? SNAP.nodes.find(n => n.id === companyEdge.object) : null;
 
   let html = '';
   html += '<div class="detail-avatar' + (cold ? ' cold' : '') + (hasUp ? ' has-update' : '') + '">';
-  html += '<img src="' + avatarSvg + '" alt="' + esc(node.label) + '" /></div>';
+  html += '<img src="' + avatarUrl + '" alt="' + esc(node.label) + '" /></div>';
   html += '<div class="detail-name">' + esc(node.label) + '</div>';
   if (props.title) html += '<div class="detail-role">' + esc(props.title) + '</div>';
   if (companyNode) html += '<div class="detail-company">' + esc(companyNode.label) + '</div>';
   if (node.type === 'person') {
-    html += '<div class="detail-temp ' + temp.cls + '">' + temp.label + '</div>';
+    const stage = getContactStage(nodeId);
+    if (stage) {
+      const pct = stage.index === 0 ? 10 : (stage.index === 1 ? 38 : (stage.index === 2 ? 68 : 100));
+      const labelNames = ['lead', 'prospect', 'opportunity', 'maintain'];
+      
+      html += '<div class="relationship-progress">';
+      html += '  <div class="progress-header">';
+      html += '    <span class="progress-title">Relationship Progress</span>';
+      html += '  </div>';
+      html += '  <div class="progress-bar-track">';
+      html += '    <div class="progress-bar-fill" style="width: ' + pct + '%;"></div>';
+      html += '  </div>';
+      html += '  <div class="progress-labels">';
+      for (let i = 0; i < 4; i++) {
+        const cls = i === stage.index ? 'active' : '';
+        html += '    <span class="label-item ' + cls + '">' + labelNames[i] + '</span>';
+      }
+      html += '  </div>';
+      html += '</div>';
+    }
   }
 
   const attrKeys = Object.entries(props).filter(([k]) => k !== 'title');
