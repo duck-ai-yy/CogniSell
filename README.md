@@ -42,31 +42,7 @@ This single data model powers three core scenarios — no separate schemas, no d
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────┐
-│  Web Frontend                                │
-│  Cytoscape.js graph · Activity stream        │
-│  Decision Inbox · Real-time agent progress   │
-└──────────────────┬───────────────────────────┘
-                   │ HTTP
-┌──────────────────┴───────────────────────────┐
-│  Skills (hot-pluggable registry)             │
-│  card.scan · lead.enrich · strategy.debate   │
-│  mail.compose · thread.digest · decay.scan   │
-└──────┬────────────────────────────┬──────────┘
-       │  Graph Contract only       │
-┌──────┴─────────┐  ┌──────────────┴───────────┐
-│  Extractor     │  │  Sync Engine             │
-│  GLiNER2 │ mock│  │  confidence → auto/inbox │
-└──────┬─────────┘  └──────────────┬───────────┘
-       └─────────────┬─────────────┘
-             ┌───────┴────────┐
-             │  Graph Core    │  ← single source of truth
-             │  nodes + edges │
-             │  + cognitive   │
-             │    state       │
-             └────────────────┘
-```
+![CogniSell Architecture](./assets/architecture.png)
 
 ### Key Design Decisions
 
