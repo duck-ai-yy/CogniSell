@@ -21,21 +21,69 @@ from skills import cards, fixtures
 from sync import router
 
 
-def card_scan(graph: GraphCore, card_id: str) -> dict[str, Any]:
+def card_scan(graph: GraphCore, image_path: str) -> dict[str, Any]:
     """Scan a business card -> candidate contact(s) + proposed edges in graph.
 
     Returns {ok, candidates:[{node_id,label,company,fields}], cards:[N2...]}.
     The candidate list feeds the N1 picker; low-confidence fields become N2
     cards the caller pushes to the inbox.
     """
-    result = mock_extractor.scan_business_card(card_id)
-    if not result.get("ok"):
-        return {"ok": False, "error": result.get("error", "scan failed"), "candidates": [], "cards": []}
+    cards_data = []
+    try:
+        import uuid
+        import re
+        import os
+        import sys
+        
+        _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if _ROOT not in sys.path:
+            sys.path.append(_ROOT)
+            
+        from module_a.segmentation import segment_business_cards
+        from module_a.agent import parse_business_card_image
+        
+        def safe_id(prefix, text):
+            if not text: return f"{prefix}_{uuid.uuid4().hex[:8]}"
+            clean = re.sub(r'[^a-z0-9]', '', text.lower())
+            return f"{prefix}_{clean}"
+            
+        # Bypass OpenCV segmentation, just feed the raw image to the LLM directly
+        parsed_result = parse_business_card_image(image_path)
+        extracted_cards = parsed_result.get("cards", [])
+        
+        for info in extracted_cards:
+            if info.get("name") or info.get("company"):
+                name = info.get("name") or "Unknown Contact"
+                company = info.get("company") or "Unknown Company"
+                title = info.get("title") or ""
+                email = info.get("email") or ""
+                phone = info.get("phone") or ""
+                
+                person_id = safe_id("n_person", name)
+                company_id = safe_id("n_company", company)
+                
+                cards_data.append({
+                    "node_hints": {"person": person_id, "company": company_id},
+                    "fields": [
+                        {"key": "name", "value": name, "confidence": 0.95},
+                        {"key": "company", "value": company, "confidence": 0.8},
+                        {"key": "title", "value": title, "confidence": 0.9},
+                        {"key": "email", "value": email, "confidence": 0.95},
+                        {"key": "phone", "value": phone, "confidence": 0.95}
+                    ]
+                })
+                
+        if not cards_data:
+            return {"ok": False, "error": "No business card detected in the image", "candidates": [], "cards": []}
+            
+    except Exception as e:
+        print("Error during real scan:", e)
+        return {"ok": False, "error": str(e), "candidates": [], "cards": []}
 
     new_cards: list[dict] = []
     candidates = []
 
-    for card_data in result.get("cards", []):
+    for card_data in cards_data:
         fields = {f["key"]: f for f in card_data["fields"]}
         hints = card_data.get("node_hints", {})
         person_id = hints.get("person")

@@ -11,7 +11,6 @@ from typing import Optional
 
 # Define the structured output schema
 class BusinessCardInfo(BaseModel):
-    is_business_card: bool = Field(description="Set to true if this crop contains a business card, false if it is noise, blank, a table surface, or a notebook corner.")
     name: Optional[str] = Field(description="The name of the person on the business card.")
     company: Optional[str] = Field(description="The company name.")
     title: Optional[str] = Field(description="The job title or position of the person.")
@@ -20,28 +19,29 @@ class BusinessCardInfo(BaseModel):
     website: Optional[str] = Field(description="The website URL if present.")
     address: Optional[str] = Field(description="The physical address.")
 
+class BusinessCardList(BaseModel):
+    cards: list[BusinessCardInfo] = Field(description="List of business cards found in the image. Return an empty list if no business cards are present.")
+
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 def parse_business_card_image(image_path: str) -> dict:
     """
-    Uses Gemini Vision API via LangChain to parse a cropped business card image directly.
+    Uses Gemini Vision API via LangChain to parse an image directly, extracting potentially multiple business cards.
     """
     if not os.environ.get("GOOGLE_API_KEY"):
         raise ValueError("GOOGLE_API_KEY environment variable not set. Please set it in your .env file.")
         
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     
-    parser = PydanticOutputParser(pydantic_object=BusinessCardInfo)
+    parser = PydanticOutputParser(pydantic_object=BusinessCardList)
     
     image_base64 = encode_image(image_path)
     
-    prompt = f"""Extract the relevant information from the provided business card image.
-Analyze the image layout, ignore any background text that belongs to other cards or is cut off.
-Focus only on the main business card in the image.
-
-If the image is just a blank table, notebook corner, or noise, set 'is_business_card' to false.
+    prompt = f"""Extract the relevant information for ALL business cards found in the provided image.
+If there are multiple business cards, extract information for each of them.
+If the image contains no business cards (e.g. it is just a blank table, notebook corner, or noise), return an empty list.
 
 {parser.get_format_instructions()}
 """
@@ -59,4 +59,4 @@ If the image is just a blank table, notebook corner, or noise, set 'is_business_
         return result.model_dump()
     except Exception as e:
         print(f"Error parsing image: {e}")
-        return {"error": str(e), "is_business_card": False}
+        return {"error": str(e), "cards": []}
