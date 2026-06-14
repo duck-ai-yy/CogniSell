@@ -489,7 +489,7 @@
 <!-- Agents -->
 <section id="agents">
   <div class="section-label">Runtime Agents</div>
-  <h2>Five agents, hot-pluggable skills</h2>
+  <h2>Four specialized agents, hot-pluggable skills</h2>
   <p>Each agent composes skills from a registry. Plug in a new skill at runtime and the agent gains a new capability instantly.</p>
 
   <table class="agent-table">
@@ -502,29 +502,24 @@
     </thead>
     <tbody>
       <tr>
-        <td><span class="agent-name"><span class="agent-dot" style="background:#3b82f6"></span>Scout</span></td>
-        <td>Intelligence & enrichment</td>
-        <td><code>card.scan</code> · <code>lead.enrich</code></td>
+        <td><span class="agent-name"><span class="agent-dot" style="background:#3b82f6"></span>New Customer Scout</span></td>
+        <td>Scans business cards via Vision model & retrieves initial context</td>
+        <td><code>card.scan</code> · <code>vision.ocr</code> · <code>online.access</code></td>
       </tr>
       <tr>
-        <td><span class="agent-name"><span class="agent-dot" style="background:#8b5cf6"></span>Strategist</span></td>
-        <td>Multi-agent approach debate</td>
-        <td><code>strategy.debate</code></td>
+        <td><span class="agent-name"><span class="agent-dot" style="background:#8b5cf6"></span>Symbolic Retrieving</span></td>
+        <td>Runs high-precision symbolic queries over the CRM Knowledge Graph</td>
+        <td><code>symbolic.query</code> · <code>target.retrieve</code></td>
       </tr>
       <tr>
-        <td><span class="agent-name"><span class="agent-dot" style="background:#f97316"></span>Outreach</span></td>
-        <td>Email composition & sending</td>
-        <td><code>mail.compose</code> · <code>mail.send</code></td>
+        <td><span class="agent-name"><span class="agent-dot" style="background:#f97316"></span>Quoting</span></td>
+        <td>Auto-extracts specs (GLiNER2) & drafts technical quotes (Gemma 4 12B)</td>
+        <td><code>gliner.extract</code> · <code>pcb.pricing</code> · <code>gemma.draft</code></td>
       </tr>
       <tr>
-        <td><span class="agent-name"><span class="agent-dot" style="background:#0d9488"></span>Digest</span></td>
-        <td>Email thread &rarr; graph triples</td>
-        <td><code>thread.digest</code></td>
-      </tr>
-      <tr>
-        <td><span class="agent-name"><span class="agent-dot" style="background:#ec4899"></span>Relationship</span></td>
-        <td>Decay detection & catch-up</td>
-        <td><code>decay.scan</code> · <code>catchup.suggest</code></td>
+        <td><span class="agent-name"><span class="agent-dot" style="background:#0d9488"></span>24h Backend</span></td>
+        <td>Continuous background news tracking & social media monitoring</td>
+        <td><code>tavily.research</code> · <code>news.track</code> · <code>linkedin.scrape</code> · <code>x.scrape</code></td>
       </tr>
     </tbody>
   </table>

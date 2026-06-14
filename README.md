@@ -70,11 +70,10 @@ This single data model powers three core scenarios — no separate schemas, no d
 
 | Agent | Role | Skills |
 |---|---|---|
-| **Scout** | Intelligence & enrichment | `card.scan`, `lead.enrich` |
-| **Strategist** | Approach strategy via multi-agent debate | `strategy.debate` |
-| **Outreach** | Email composition & sending | `mail.compose`, `mail.send` |
-| **Digest** | Email thread → graph triples | `thread.digest` |
-| **Relationship** | Decay detection & catch-up | `decay.scan`, `catchup.suggest` |
+| **New Customer Scout** | Scans business cards via Vision model & retrieves initial context | `card.scan`, `vision.ocr`, `online.access` |
+| **Symbolic Retrieving** | Runs high-precision symbolic queries over the CRM Knowledge Graph | `symbolic.query`, `target.retrieve` |
+| **Quoting** | Auto-extracts specs (GLiNER2) & drafts technical quotes (Gemma 4 12B) | `gliner.extract`, `pcb.pricing`, `gemma.draft` |
+| **24h Backend** | Continuous background news tracking & social media monitoring | `tavily.research`, `news.track`, `linkedin.scrape`, `x.scrape` |
 
 ---
 
