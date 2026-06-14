@@ -138,14 +138,18 @@ import shutil
 from fastapi import File, UploadFile
 
 @app.post("/api/scan")
-def scan(file: Optional[UploadFile] = None) -> dict:
+def scan(file: Optional[UploadFile] = File(None)) -> dict:
     _require_skill("scout")
     
-    if file is not None:
+    if file is not None and getattr(file, "filename", None):
+        print(f"Received file: {file.filename}")
         image_path = os.path.join(_ROOT, "temp_scan.png")
+        contents = file.file.read()
+        print(f"File size: {len(contents)} bytes")
         with open(image_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(contents)
     else:
+        print("No file received, falling back to sample_real.png")
         # Using the real sample image generated previously
         image_path = os.path.join(_ROOT, "..", "sample_real.png")
         
