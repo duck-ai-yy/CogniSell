@@ -76,6 +76,7 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .panel-right {
   display: flex; flex-direction: column;
   background: var(--surface);
+  min-height: 0; overflow: hidden;
 }
 
 /* ── Graph area ── */
@@ -522,3 +523,42 @@ body { display: flex; flex-direction: column; overflow: hidden; }
 .modal-actions {
   display: flex; justify-content: flex-end;
 }
+
+/* ── Task tabs ── */
+.task-tabs {
+  flex: 0 0 auto;
+  display: flex; align-items: stretch; gap: 4px;
+  padding: 8px 12px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+}
+.task-tabs:empty { display: none; }
+.task-tab {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 8px 8px 0 0;
+  font-size: 12.5px; font-weight: 500; color: var(--ink-3);
+  background: transparent; border: 1px solid transparent; border-bottom: none;
+  cursor: pointer; white-space: nowrap; max-width: 220px;
+  margin-bottom: -1px;
+  transition: color .15s, background .15s;
+}
+.task-tab:hover { color: var(--ink); background: var(--surface-2); }
+.task-tab.active {
+  color: var(--ink); background: var(--surface-2);
+  border-color: var(--border);
+}
+.task-tab .tab-label {
+  overflow: hidden; text-overflow: ellipsis; max-width: 160px;
+}
+.task-tab .tab-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex: 0 0 7px;
+  background: var(--accent);
+}
+.task-tab .tab-close {
+  width: 16px; height: 16px; border-radius: 4px; border: none;
+  background: transparent; color: var(--ink-3); cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 14px; line-height: 1; padding: 0;
+}
+.task-tab .tab-close:hover { background: var(--border); color: var(--ink); }

@@ -6,7 +6,7 @@
   <title>CogniSell — AI Relationship OS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=2">
+  <link rel="stylesheet" href="/static/style.css?v=4">
   <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
 </head>
 <body>
@@ -41,14 +41,11 @@
     </section>
 
     <section class="panel-right">
+      <div class="task-tabs" id="task-tabs"></div>
       <div class="right-scroll" id="right-scroll">
         <div class="empty-state" id="empty-state">
-          <svg class="empty-icon" width="56" height="56" viewBox="0 0 56 56" fill="none">
-            <circle cx="28" cy="28" r="27" stroke="#e5e5e5" stroke-width="2"/>
-            <path d="M20 24l5 5-5 5M28 34h8" stroke="#a1a1aa" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-          <p class="empty-title">Ready when you are</p>
-          <p class="empty-sub">Scan a business card, speak a command, or just type.</p>
+          <p class="empty-title">Welcome back, Tim — great to see you!</p>
+          <p class="empty-sub">Open a task above, scan a business card, speak a command, or just type to get started.</p>
         </div>
 
         <div class="activity-stream" id="activity-stream" hidden>
@@ -114,6 +111,6 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=7"></script>
 </body>
 </html>

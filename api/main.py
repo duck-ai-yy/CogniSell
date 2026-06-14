@@ -34,6 +34,12 @@ from seed import seed_data
 from sync.router import PrefStore
 from skills import scout, strategist, outreach, digest, relationship, registry, cards
 
+# PCB auto-quoting agent (inbound RFQ -> deterministic price -> drafted quote).
+try:
+    from pcb_auto_quoting_agent.pcb_agent import PCBQuotingAgent
+except Exception:  # pragma: no cover - import guard, visible via endpoint
+    PCBQuotingAgent = None
+
 
 
 # Fixed "now" for the demo so decay_scan deterministically flags the 92-day edge
@@ -114,6 +120,10 @@ class VoiceBody(BaseModel):
 class JobChangeBody(BaseModel):
     contact_id: str
     new_company_name: str
+
+
+class PcbQuoteBody(BaseModel):
+    email_text: Optional[str] = None
 
 
 # --------------------------------------------------------------------------
@@ -605,6 +615,79 @@ def job_change(body: JobChangeBody) -> dict:
 
 
 # --------------------------------------------------------------------------
+# PCB auto-quoting
+# --------------------------------------------------------------------------
+
+# A representative multilingual RFQ standing in for Claudia's price-proposal
+# email. Constitution #5: external GLiNER2 perception is mocked behind this
+# fixture so the demo runs deterministically offline.
+_PCB_DEMO_RFQ = (
+    "Hi, this is Claudia Reiter from Stahlwerk Nord. We need a price proposal "
+    "for 500 pcs of 4-layer FR-4 boards, 2oz copper, ENIG finish, green solder "
+    "mask, 1.6mm thickness, 4mil trace spacing. This is a rush order (\u6025), "
+    "please ship FOB. Thanks!"
+)
+
+_PCB_DEMO_RAW = {
+    "Layers": "4-layer",
+    "Material": "FR-4",
+    "Copper_Thickness": "2oz",
+    "Surface_Finish": "ENIG",
+    "Quantity": "500 pcs",
+    "Board_Thickness": "1.6mm",
+    "Min_Trace_Spacing": "4mil",
+    "Solder_Mask_Color": "green",
+    "Lead_Time": "rush (\u6025)",
+    "Incoterm": "FOB",
+}
+
+
+@app.post("/api/pcb/quote")
+def pcb_quote(body: PcbQuoteBody) -> dict:
+    """Inbound RFQ -> normalized specs -> deterministic price -> drafted quote.
+
+    Demonstrates the PCBQuotingAgent. The GLiNER2 perception call needs a
+    Pioneer API key and network, so it is attempted only when an API key is
+    present; otherwise we fall back to the demo fixture and still run the real
+    (offline, deterministic) normalize -> price -> draft pipeline.
+    """
+    if PCBQuotingAgent is None:
+        raise HTTPException(500, "PCBQuotingAgent is unavailable (import failed).")
+
+    email_text = (body.email_text or _PCB_DEMO_RFQ).strip()
+
+    api_key = os.environ.get("PIONEER_API_KEY", "")
+    model_id = os.environ.get("GLINER_MODEL_ID", "")
+    raw = None
+    source = "mock"
+    if api_key and model_id and body.email_text:
+        try:
+            agent = PCBQuotingAgent(api_key, model_id)
+            extracted = agent._extract_parameters(email_text)
+            if "_error" not in extracted and extracted:
+                raw = extracted
+                source = "gliner2"
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = dict(_PCB_DEMO_RAW)
+
+    normalized = PCBQuotingAgent._normalize_parameters(raw)
+    pricing = PCBQuotingAgent._calculate_price(normalized)
+    agent = PCBQuotingAgent.__new__(PCBQuotingAgent)
+    reply = agent._draft_quote_email_with_gemma(email_text, normalized, pricing)
+
+    return {
+        "ok": True,
+        "source": source,
+        "email_text": email_text,
+        "raw_extracted": raw,
+        "normalized_specs": normalized,
+        "pricing": pricing,
+        "gemma_reply": reply,
+    }
+
+
 # Static shell
 # --------------------------------------------------------------------------
 

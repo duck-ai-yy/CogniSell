@@ -13,6 +13,100 @@ const CLIENT_CARDS = [];
 let contactId = 'n_andreas';
 const updatedNodes = new Set();
 
+// ── Task tabs ──
+const TASKS = [];
+let activeTaskId = null;
+let taskSeq = 0;
+
+function activeTask() { return TASKS.find(t => t.id === activeTaskId) || null; }
+
+function createTask(title, opts) {
+  opts = opts || {};
+  const id = 't_' + (++taskSeq);
+  const task = {
+    id, title,
+    streamItems: [],
+    clientCards: [],
+    showServerCards: !!opts.showServerCards,
+    closable: opts.closable !== false,
+    runner: opts.runner || null,
+    hasRun: false,
+  };
+  TASKS.push(task);
+  return task;
+}
+
+function renderTabs() {
+  const bar = $('task-tabs');
+  if (!bar) return;
+  bar.innerHTML = '';
+  for (const t of TASKS) {
+    const tab = document.createElement('div');
+    tab.className = 'task-tab' + (t.id === activeTaskId ? ' active' : '');
+    tab.innerHTML =
+      '<span class="tab-dot"></span>' +
+      '<span class="tab-label">' + esc(t.title) + '</span>' +
+      (t.closable ? '<button class="tab-close" title="Close task">&times;</button>' : '');
+    tab.addEventListener('click', () => switchTask(t.id));
+    const close = tab.querySelector('.tab-close');
+    if (close) close.addEventListener('click', ev => { ev.stopPropagation(); closeTask(t.id); });
+    bar.appendChild(tab);
+  }
+}
+
+function renderActiveStream() {
+  const task = activeTask();
+  const container = $('stream-items');
+  container.innerHTML = '';
+  if (task && task.streamItems.length) {
+    task.streamItems.forEach(el => container.appendChild(el));
+    $('activity-stream').hidden = false;
+    $('empty-state').style.display = 'none';
+  } else {
+    $('activity-stream').hidden = true;
+    $('empty-state').style.display = '';
+  }
+}
+
+async function switchTask(id) {
+  if (activeTaskId === id) return;
+  activeTaskId = id;
+  renderTabs();
+  renderActiveStream();
+  await renderCards();
+  scrollRight();
+  const task = activeTask();
+  if (task && task.runner && !task.hasRun) {
+    task.hasRun = true;
+    await task.runner(task);
+  }
+}
+
+async function closeTask(id) {
+  const i = TASKS.findIndex(t => t.id === id);
+  if (i < 0) return;
+  const wasActive = activeTaskId === id;
+  TASKS.splice(i, 1);
+  if (wasActive) activeTaskId = TASKS.length ? TASKS[Math.max(0, i - 1)].id : null;
+  renderTabs();
+  renderActiveStream();
+  await renderCards();
+}
+
+function seedStreamItem(agent, text) {
+  const task = activeTask();
+  if (!task) return;
+  const row = document.createElement('div');
+  row.className = 'stream-item';
+  const color = AGENT_COLORS[agent] || '#6b7280';
+  row.innerHTML =
+    '<span class="agent-dot" style="background:' + color + '"></span>' +
+    '<span class="agent-label">' + agent + '</span>' +
+    '<span class="agent-text">' + esc(text) + '</span>' +
+    '<span class="agent-status"><span class="check-mark">✓</span></span>';
+  task.streamItems.push(row);
+}
+
 const $ = id => document.getElementById(id);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -518,6 +612,8 @@ function actStream(agent, text) {
     '<span class="agent-label">' + agent + '</span>' +
     '<span class="agent-text"></span>' +
     '<span class="agent-status"><span class="spinner-sm"></span></span>';
+  const _task = activeTask();
+  if (_task) _task.streamItems.push(row);
   $('stream-items').appendChild(row);
   scrollRight();
   typeText(row.querySelector('.agent-text'), text);
@@ -539,12 +635,15 @@ function scrollRight() {
 // ── Decision Cards ──
 
 function pushCard(card) {
-  CLIENT_CARDS.push(card);
+  const task = activeTask();
+  (task ? task.clientCards : CLIENT_CARDS).push(card);
   renderCards();
 }
 function removeCard(id) {
-  const i = CLIENT_CARDS.findIndex(c => c.id === id);
-  if (i >= 0) CLIENT_CARDS.splice(i, 1);
+  const task = activeTask();
+  const arr = task ? task.clientCards : CLIENT_CARDS;
+  const i = arr.findIndex(c => c.id === id);
+  if (i >= 0) arr.splice(i, 1);
   renderCards();
 }
 
@@ -555,9 +654,12 @@ async function refreshServerCards() {
 }
 
 async function renderCards() {
-  const server = await refreshServerCards();
-  const all = [...CLIENT_CARDS, ...server];
+  const task = activeTask();
   const area = $('cards-area');
+  if (!task) { area.innerHTML = ''; scrollRight(); return; }
+  let server = [];
+  if (task.showServerCards) server = await refreshServerCards();
+  const all = [...task.clientCards, ...server];
   area.innerHTML = '';
   for (const c of all) area.appendChild(buildCardEl(c));
   scrollRight();
@@ -601,6 +703,10 @@ function buildCardEl(c) {
     body = '<div class="card-body">' + esc(c.body) + '</div>';
     actions = '<button class="btn btn-primary" data-act="approve-signal">Follow up</button>' +
               '<button class="btn btn-ghost" data-act="dismiss">Dismiss</button>';
+  } else if (c.node_type === 'TASK_DRAFT') {
+    body = '<textarea class="card-textarea" id="mail-' + c.id + '">' + esc(c.body) + '</textarea>';
+    actions = '<button class="btn btn-primary" data-act="task-send">Approve &amp; send</button>' +
+              '<button class="btn btn-ghost" data-act="dismiss">Save for later</button>';
   } else {
     body = '<div class="card-body">' + esc(c.body || '') + '</div>';
     actions = '<button class="btn btn-primary" data-act="approve">Approve</button>' +
@@ -622,6 +728,14 @@ function buildCardEl(c) {
 async function onCardAction(card, act) {
   try {
     if (act === 'dismiss') { removeCard(card.id); return; }
+    if (act === 'task-send') {
+      removeCard(card.id);
+      const r = actStream('Outreach', 'Sending your reply...');
+      await sleep(700);
+      actDone(r, 'Reply sent ✓');
+      toast('Reply sent.');
+      return;
+    }
     if (act === 'confirm-contact') return confirmContact(card);
     if (act === 'save-meet') return saveMeet();
     if (act === 'send') {
@@ -641,6 +755,12 @@ async function onCardAction(card, act) {
 
 async function scanFlow(wasUsingCamera, currentUploadedFile, capturePromise) {
   $('empty-state').style.display = 'none';
+
+  const scanTask = createTask('New card scan', { showServerCards: true });
+  activeTaskId = scanTask.id;
+  renderTabs();
+  renderActiveStream();
+  await renderCards();
 
   const r1 = actStream('Scout', 'Reading business card via OCR...');
   await sleep(1000);
@@ -675,6 +795,8 @@ async function scanFlow(wasUsingCamera, currentUploadedFile, capturePromise) {
   } catch (err) { actDone(r1, 'Scan failed: ' + err.message); return; }
   const cand = (scan.candidates || [])[0] || {};
   contactId = cand.node_id || contactId;
+  scanTask.title = (cand.label || 'New contact') + ' — card scan';
+  renderTabs();
   actDone(r1, 'Found: ' + (cand.label || 'contact') + ' · ' + (cand.company || ''));
   await loadGraph();
   focusNode(contactId);
@@ -954,4 +1076,60 @@ $('add-person-btn').addEventListener('click', async () => {
 });
 
 setupVoice();
+
+function buildPcbSpecLine(specs) {
+  return specs.Layers + '-layer ' + specs.Material + ' \u00b7 ' + specs.Quantity + ' pcs \u00b7 ' +
+    specs.Copper_Thickness + ' Cu \u00b7 ' + specs.Surface_Finish + ' \u00b7 ' + specs.Lead_Time;
+}
+
+function money(n) {
+  return '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+async function runClaudiaQuote(task) {
+  const r0 = actStream('Digest', 'Reading Claudia Reiter\'s inbound RFQ...');
+  await sleep(900);
+  actDone(r0, 'New RFQ from Claudia Reiter (Stahlwerk Nord) \u2014 PCB price proposal.');
+
+  const r1 = actStream('Scout', 'Extracting PCB specs with GLiNER2...');
+  let data;
+  try {
+    data = await api('POST', '/api/pcb/quote', {});
+  } catch (err) {
+    actDone(r1, 'Extraction failed: ' + err.message);
+    return;
+  }
+  await sleep(800);
+  const specs = data.normalized_specs || {};
+  const p = data.pricing || {};
+  actDone(r1, 'GLiNER2 parsed: ' + buildPcbSpecLine(specs) + '.');
+
+  const r2 = actStream('Strategist', 'Normalizing multilingual specs & computing price...');
+  await sleep(1000);
+  actDone(r2, 'Priced deterministically \u2014 unit ' + money(p.unit_price_usd) +
+    ', setup ' + money(p.setup_fee_usd) + ', rush ' + money(p.rush_fee_usd) +
+    ' \u2192 total ' + money(p.total_price_usd) + '.');
+
+  const r3 = actStream('Outreach', 'Drafting the quote reply with Gemma...');
+  await sleep(1000);
+  actDone(r3, 'Draft ready for your review.');
+
+  pushCard({
+    id: 'task_claudia_quote', node_type: 'TASK_DRAFT',
+    title: 'Quote reply to Claudia \u2014 ' + buildPcbSpecLine(specs),
+    body: data.gemma_reply || '',
+    why: 'Auto-quoted from Claudia\'s RFQ: GLiNER2 extraction \u2192 deterministic pricing brain \u2192 Gemma draft. Total ' +
+      money(p.total_price_usd) + ' via ' + (specs.Incoterm || 'FOB') + '.',
+  });
+}
+
+function initTasks() {
+  // The task exists immediately, but its agents only run when the user opens it.
+  createTask('Claudia \u2014 price proposal', { runner: runClaudiaQuote });
+  renderTabs();
+  renderActiveStream();
+}
+
+initTasks();
 loadGraph();
+renderCards();
