@@ -50,7 +50,7 @@ def load_lead_profile(results_json_path: str, company: str, recipient: str = Non
             
     return None
 
-def write_cold_email(product_doc_path: str, results_json_path: str, company: str, recipient: str = None) -> str:
+def write_cold_email(product_doc_path: str, company: str, recipient: str = None, lead_profile: dict = None, results_json_path: str = None) -> str:
     """
     Generates a highly personalized cold email based on company product docs 
     and target lead's enriched profile details.
@@ -59,7 +59,8 @@ def write_cold_email(product_doc_path: str, results_json_path: str, company: str
     product_doc = load_text_file(product_doc_path)
     
     # 2. Find and load the lead's enriched profile
-    lead_profile = load_lead_profile(results_json_path, company, recipient)
+    if not lead_profile and results_json_path:
+        lead_profile = load_lead_profile(results_json_path, company, recipient)
     
     if not lead_profile:
         print(f"Warning: No matching lead profile found for Company: '{company}', Recipient: '{recipient}' in results.json.")

@@ -101,7 +101,13 @@ function getContactTemp(nodeId) {
   return { label: 'Hot', cls: 'hot' };
 }
 
-function literalId(edge) { return 'lit_' + edge.id; }
+function literalId(edge) {
+  // Use a hash-like or encoded ID based on the literal value so identical literals map to the same node
+  let str = String(edge.object);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = Math.imul(31, hash) + str.charCodeAt(i) | 0;
+  return 'lit_' + Math.abs(hash).toString(16);
+}
 
 function buildElements(snap) {
   const nodeIds = new Set(snap.nodes.map(n => n.id));
@@ -119,6 +125,9 @@ function buildElements(snap) {
     nodes.push({ data: d });
   }
   const edges = [];
+  const edgeMap = new Map();
+  const statusWeight = { confirmed: 4, corrected: 3, proposed: 2, retired: 1 };
+
   for (const e of snap.edges) {
     if (!nodeIds.has(e.subject)) continue;
     let target = e.object;
@@ -128,12 +137,28 @@ function buildElements(snap) {
         id: target, label: String(e.object), ntype: 'literal',
       }});
     }
-    edges.push({ data: {
+    const key = `${e.subject}__${target}`;
+    const newEdge = { data: {
       id: e.id, source: e.subject, target,
       label: e.predicate.replace(/_/g, ' '),
       status: e.status, confidence: e.confidence,
       extractor: e.extractor, esource: e.source, t: e.t,
-    }});
+    }};
+    
+    if (!edgeMap.has(key)) {
+      edgeMap.set(key, newEdge);
+    } else {
+      const existing = edgeMap.get(key);
+      const wExisting = statusWeight[existing.data.status] || 0;
+      const wNew = statusWeight[newEdge.data.status] || 0;
+      if (wNew > wExisting || (wNew === wExisting && newEdge.data.t > existing.data.t)) {
+         edgeMap.set(key, newEdge);
+      }
+    }
+  }
+  
+  for (const edge of edgeMap.values()) {
+    edges.push(edge);
   }
   return { nodes, edges };
 }
