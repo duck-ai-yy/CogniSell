@@ -28,6 +28,7 @@ function createTask(title, opts) {
     streamItems: [],
     clientCards: [],
     showServerCards: !!opts.showServerCards,
+    serverCardIds: opts.showServerCards ? new Set() : null,
     closable: opts.closable !== false,
     runner: opts.runner || null,
     hasRun: false,
@@ -647,10 +648,29 @@ function removeCard(id) {
   renderCards();
 }
 
-async function refreshServerCards() {
+async function refreshServerCards(task) {
   let serverCards = [];
   try { serverCards = (await api('GET', '/api/inbox')).cards || []; } catch (_) {}
-  return serverCards.filter(c => c.node_type !== 'N2' && c.node_type !== 'N3');
+  const own = (task && task.serverCardIds) || null;
+  // A task only shows the server cards it explicitly owns, so decision cards
+  // never leak across task tabs.
+  return serverCards.filter(c =>
+    c.node_type !== 'N2' && c.node_type !== 'N3' &&
+    !!own && own.has(c.id));
+}
+
+// Run an action that creates server-side cards, then assign any newly created
+// inbox cards to the given task so they render only under that task's tab.
+async function claimServerCards(task, fn) {
+  let before = new Set();
+  try { before = new Set(((await api('GET', '/api/inbox')).cards || []).map(c => c.id)); } catch (_) {}
+  const result = await fn();
+  let after = [];
+  try { after = (await api('GET', '/api/inbox')).cards || []; } catch (_) {}
+  if (task && task.serverCardIds) {
+    for (const c of after) if (!before.has(c.id)) task.serverCardIds.add(c.id);
+  }
+  return result;
 }
 
 async function renderCards() {
@@ -658,7 +678,7 @@ async function renderCards() {
   const area = $('cards-area');
   if (!task) { area.innerHTML = ''; scrollRight(); return; }
   let server = [];
-  if (task.showServerCards) server = await refreshServerCards();
+  if (task.showServerCards) server = await refreshServerCards(task);
   const all = [...task.clientCards, ...server];
   area.innerHTML = '';
   for (const c of all) area.appendChild(buildCardEl(c));
@@ -866,7 +886,7 @@ async function draftFollowup() {
 
   await sleep(400);
   const rc = actStream('Outreach', 'Drafting follow-up email using graph context...');
-  await api('POST', '/api/mail/compose', { contact_id: contactId });
+  await claimServerCards(activeTask(), () => api('POST', '/api/mail/compose', { contact_id: contactId }));
   await sleep(900);
   actDone(rc, 'Draft ready for your review');
   await renderCards();
@@ -890,42 +910,33 @@ async function sendMail(card, body) {
 }
 
 async function proactiveSweep() {
-  const r1 = actStream('Social Monitor', 'Scanning tracked contacts\' social feeds...');
-  await sleep(1200);
-  await api('POST', '/api/signals/scan');
-  actDone(r1, 'Detected: Nordic Drives AB may be going to tender');
-  await renderCards();
-
-  await sleep(600);
-  const r2 = actStream('Relationship', 'Scanning your book for cooling relationships...');
-  await api('POST', '/api/catchup/scan');
+  // Warm-up surfaces as its own task tab.
+  const warmTask = createTask('Warm-up', { showServerCards: true });
+  activeTaskId = warmTask.id;
+  renderTabs();
+  renderActiveStream();
+  const rw = actStream('Relationship', 'Scanning your book for cooling relationships...');
+  await claimServerCards(warmTask, () => api('POST', '/api/catchup/scan'));
   await sleep(1000);
-  actDone(r2, 'Found: Markus Brandt — 92 days since last contact');
+  actDone(rw, 'Found: Markus Brandt \u2014 92 days since last contact');
   await loadGraph();
   await renderCards();
 
-  toast('Two items may need you — see the cards below.');
-
-  await sleep(2500);
-  jobChangeFlow();
-}
-
-async function jobChangeFlow() {
-  const r1 = actStream('Social Monitor', 'Detected job change: Henrik Sørensen...');
+  // Signal surfaces as its own task tab.
+  const sigTask = createTask('Signal', { showServerCards: true });
+  activeTaskId = sigTask.id;
+  renderTabs();
+  renderActiveStream();
+  const rs = actStream('Social Monitor', 'Scanning tracked contacts\' social feeds...');
+  await claimServerCards(sigTask, () => api('POST', '/api/signals/scan'));
   await sleep(1200);
-  try {
-    await api('POST', '/api/signals/job-change', {
-      contact_id: 'n_noise_p3',
-      new_company_name: 'Siemens Energy AG',
-    });
-  } catch (err) { actDone(r1, 'Job change detection failed'); return; }
-  actDone(r1, 'Henrik moved: Aalborg Maskin → Siemens Energy AG');
-
-  updatedNodes.add('n_noise_p3');
+  actDone(rs, 'Detected: Nordic Drives AB may be going to tender');
   await loadGraph();
-  focusNode('n_noise_p3');
-  toast('Henrik Sørensen changed jobs — tap the red-bordered node to review.');
+  await renderCards();
+
+  toast('A warm-up and a signal need your attention \u2014 see the new tabs.');
 }
+
 
 // ── Voice ──
 
