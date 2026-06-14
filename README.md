@@ -2,6 +2,8 @@
 
 **An auditable "second brain" for long-cycle industrial sales.**
 
+👉 **Live Demo Site**: [https://duck-ai-yy.github.io/CogniSell/](https://duck-ai-yy.github.io/CogniSell/)
+
 Every customer relationship is stored as a human-readable knowledge graph — not a black-box embedding. Each edge carries a **cognitive state** (`proposed → confirmed → corrected → retired`), so you always know *who believed what*, at what confidence, and how the picture evolved over time.
 
 ---

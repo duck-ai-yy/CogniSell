@@ -1,9 +1,3 @@
-import os
-from dotenv import load_dotenv
-from tavily import TavilyClient
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 from typing import Optional, List
 
@@ -27,6 +21,9 @@ def enrich_business_card_data(basic_info: dict) -> dict:
     Takes basic business card info, searches the internet via Tavily, 
     and synthesizes an EnrichedCRMInfo object using Gemini.
     """
+    import os
+    from tavily import TavilyClient
+
     # Instantiate Tavily client
     tavily_api_key = os.environ.get("TAVILY_API_KEY")
     if not tavily_api_key:
@@ -66,6 +63,10 @@ def enrich_business_card_data(basic_info: dict) -> dict:
     combined_context = "\n".join(search_contexts)
     
     # Synthesize with Gemini
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_core.prompts import PromptTemplate
+    from langchain_core.output_parsers import PydanticOutputParser
+
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     parser = PydanticOutputParser(pydantic_object=EnrichedCRMInfo)
     

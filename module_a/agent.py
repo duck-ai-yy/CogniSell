@@ -2,10 +2,6 @@ import os
 import base64
 from dotenv import load_dotenv
 load_dotenv()
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -33,6 +29,11 @@ def parse_business_card_image(image_path: str) -> dict:
     if not os.environ.get("GOOGLE_API_KEY"):
         raise ValueError("GOOGLE_API_KEY environment variable not set. Please set it in your .env file.")
         
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_core.prompts import PromptTemplate
+    from langchain_core.output_parsers import PydanticOutputParser
+    from langchain_core.messages import HumanMessage
+
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     
     parser = PydanticOutputParser(pydantic_object=BusinessCardList)

@@ -1,8 +1,6 @@
 import os
 import json
 from dotenv import load_dotenv
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 
@@ -75,6 +73,9 @@ def write_cold_email(product_doc_path: str, company: str, recipient: str = None,
         }
 
     # 3. Instantiate Gemini LLM
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_core.prompts import PromptTemplate
+
     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.2)
     
     # 4. Formulate email generation prompt
