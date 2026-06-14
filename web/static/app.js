@@ -549,24 +549,19 @@ async function onCardAction(card, act) {
 
 // ── Complete Demo Flow ──
 
-async function scanFlow() {
+async function scanFlow(wasUsingCamera, currentUploadedFile, capturePromise) {
   $('empty-state').style.display = 'none';
 
   const r1 = actStream('Scout', 'Reading business card via OCR...');
   await sleep(1000);
   let scan;
   try {
-    if (useCamera) {
-      const video = $('camera-video');
-      const canvas = $('camera-canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      canvas.getContext('2d').drawImage(video, 0, 0);
-      
-      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9));
+    if (wasUsingCamera) {
+      const blob = await capturePromise;
       const formData = new FormData();
-      formData.append('file', blob, 'camera_scan.jpg');
-      
+      if (blob) {
+        formData.append('file', blob, 'camera_scan.jpg');
+      }
       const resp = await fetch('/api/scan', { method: 'POST', body: formData });
       if (!resp.ok) {
         let detail = 'HTTP ' + resp.status;
@@ -574,9 +569,9 @@ async function scanFlow() {
         throw new Error(detail);
       }
       scan = await resp.json();
-    } else if (uploadedFile) {
+    } else if (currentUploadedFile) {
       const formData = new FormData();
-      formData.append('file', uploadedFile, uploadedFile.name);
+      formData.append('file', currentUploadedFile, currentUploadedFile.name);
       const resp = await fetch('/api/scan', { method: 'POST', body: formData });
       if (!resp.ok) {
         let detail = 'HTTP ' + resp.status;
@@ -827,8 +822,26 @@ $('file-input').addEventListener('change', (e) => {
 
 $('start-scan-btn').addEventListener('click', () => {
   $('upload-modal').hidden = true;
-  scanFlow();
-  if (useCamera) toggleCamera();
+  
+  // Capture the current states before any async delays in scanFlow
+  const currentUseCamera = useCamera;
+  const currentCameraStream = cameraStream;
+  const currentUploadedFile = uploadedFile;
+  
+  // Create a copy of the blob/formData synchronously before the stream stops
+  let capturePromise = Promise.resolve(null);
+  if (currentUseCamera && currentCameraStream) {
+    const video = $('camera-video');
+    const canvas = $('camera-canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    capturePromise = new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9));
+  }
+  
+  if (useCamera) toggleCamera(); // Turn off camera immediately for UX
+  
+  scanFlow(currentUseCamera, currentUploadedFile, capturePromise);
 });
 $('scan-btn').addEventListener('click', openUploadModal);
 setupVoice();
