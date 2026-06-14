@@ -40,3 +40,5 @@ graph_store.json
 .copilot/
 .aider/
 .continue/
+temp_scan.png
+output_crops/

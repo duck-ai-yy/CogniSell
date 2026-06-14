@@ -530,8 +530,29 @@ async function scanFlow() {
   const r1 = actStream('Scout', 'Reading business card via OCR...');
   await sleep(1000);
   let scan;
-  try { scan = await api('POST', '/api/scan'); }
-  catch (err) { actDone(r1, 'Scan failed: ' + err.message); return; }
+  try {
+    if (useCamera) {
+      const video = $('camera-video');
+      const canvas = $('camera-canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+      
+      const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.9));
+      const formData = new FormData();
+      formData.append('file', blob, 'camera_scan.jpg');
+      
+      const resp = await fetch('/api/scan', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        let detail = 'HTTP ' + resp.status;
+        try { detail = (await resp.json()).detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      scan = await resp.json();
+    } else {
+      scan = await api('POST', '/api/scan');
+    }
+  } catch (err) { actDone(r1, 'Scan failed: ' + err.message); return; }
   const cand = (scan.candidates || [])[0] || {};
   contactId = cand.node_id || contactId;
   actDone(r1, 'Found: ' + (cand.label || 'contact') + ' · ' + (cand.company || ''));
@@ -558,7 +579,7 @@ async function confirmContact(card) {
   const r = actStream('Scout', 'Filing contact & enriching company facts...');
   await api('POST', '/api/scan/select', { ids: [contactId] });
   await sleep(800);
-  actDone(r, 'Filed Andreas Vogel · +4 enriched facts');
+  actDone(r, 'Filed contact & retrieved online data');
   await loadGraph();
   focusNode(contactId);
 
@@ -703,7 +724,56 @@ async function handleVoice(transcript) {
   } catch (err) { toast('Voice failed: ' + err.message); }
 }
 
+// ── Camera and Modal ──
+let useCamera = false;
+let cameraStream = null;
+
+async function toggleCamera() {
+  useCamera = !useCamera;
+  const video = $('camera-video');
+  const imgContainer = $('image-preview-container');
+  const camContainer = $('camera-container');
+  const hint = $('upload-hint');
+  const btn = $('toggle-camera-btn');
+  
+  if (useCamera) {
+    try {
+      cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      video.srcObject = cameraStream;
+      imgContainer.hidden = true;
+      camContainer.hidden = false;
+      hint.textContent = 'Position card in view and click Start Scan.';
+      btn.textContent = 'Use Sample';
+    } catch (err) {
+      useCamera = false;
+      toast('Camera access denied or unavailable: ' + err.message);
+    }
+  } else {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+    }
+    imgContainer.hidden = false;
+    camContainer.hidden = true;
+    hint.textContent = 'Using sample image. Click \'Use Camera\' to scan a real card.';
+    btn.textContent = 'Use Camera';
+  }
+}
+
 // ── Init ──
-$('scan-btn').addEventListener('click', scanFlow);
+function openUploadModal() {
+  $('upload-modal').hidden = false;
+}
+$('modal-close').addEventListener('click', () => { 
+  $('upload-modal').hidden = true; 
+  if (useCamera) toggleCamera();
+});
+$('toggle-camera-btn').addEventListener('click', toggleCamera);
+$('start-scan-btn').addEventListener('click', () => {
+  $('upload-modal').hidden = true;
+  scanFlow();
+  if (useCamera) toggleCamera();
+});
+$('scan-btn').addEventListener('click', openUploadModal);
 setupVoice();
 loadGraph();

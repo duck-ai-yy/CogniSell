@@ -125,6 +125,13 @@ class GraphCore:
         self.save()
         return edge
 
+    def retire(self, edge_id: str) -> Edge:
+        edge = self._require_edge(edge_id)
+        edge.status = "retired"
+        edge.t = time.time()
+        self.save()
+        return edge
+
     def correct(self, edge_id: str, new_fields: dict[str, Any]) -> Edge:
         """Retire the old edge and create a new corrected edge pointing back at
         it via supersedes. Never mutates the old edge's facts (invariant #1)."""

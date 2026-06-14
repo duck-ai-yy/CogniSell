@@ -13,6 +13,7 @@ skills never import api. #3: every failure path returns a visible error payload.
 from __future__ import annotations
 
 import os
+import sys
 import time
 from typing import Any, Optional
 
@@ -21,14 +22,19 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_STORE_PATH = os.path.join(_ROOT, "graph_store.json")
+_WEB_DIR = os.path.join(_ROOT, "web")
+
+# Add the parent directory (BusinessCardOCR) to sys.path to import module_a and module_b
+sys.path.append(os.path.dirname(_ROOT))
+
 from graph import GraphCore, Node, Edge
 from seed import seed_data
 from sync.router import PrefStore
 from skills import scout, strategist, outreach, digest, relationship, registry, cards
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_STORE_PATH = os.path.join(_ROOT, "graph_store.json")
-_WEB_DIR = os.path.join(_ROOT, "web")
+
 
 # Fixed "now" for the demo so decay_scan deterministically flags the 92-day edge
 # regardless of wall-clock drift between seeding and serving. Seed anchors edges
@@ -128,15 +134,26 @@ def get_graph() -> dict:
 # Scenario ① — scan & select
 # --------------------------------------------------------------------------
 
+import shutil
+from fastapi import File, UploadFile
+
 @app.post("/api/scan")
-def scan() -> dict:
+def scan(file: Optional[UploadFile] = None) -> dict:
     _require_skill("scout")
-    result = scout.card_scan(graph, DEMO_CARD)
+    
+    if file is not None:
+        image_path = os.path.join(_ROOT, "temp_scan.png")
+        with open(image_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    else:
+        # Using the real sample image generated previously
+        image_path = os.path.join(_ROOT, "..", "sample_real.png")
+        
+    result = scout.card_scan(graph, image_path)
     if not result.get("ok"):
         raise HTTPException(status_code=400, detail=result.get("error", "scan failed"))
     _push_cards(result["cards"])
     return {"ok": True, "candidates": result["candidates"], "cards_added": len(result["cards"])}
-
 
 @app.post("/api/scan/select")
 def scan_select(body: SelectBody) -> dict:
@@ -144,11 +161,31 @@ def scan_select(body: SelectBody) -> dict:
     confirmed = []
     for node_id in body.ids:
         # Confirm the works_at edge for the selected contact, then enrich.
-        for e in graph.query(subject=node_id, predicate="works_at"):
-            if e.status == "proposed":
-                graph.confirm(e.id)
-                confirmed.append(e.id)
-        enrich = scout.lead_enrich(graph, DEMO_COMPANY)
+        company_id = None
+        
+        # Gather all works_at edges
+        all_works_at = list(graph.query(subject=node_id, predicate="works_at"))
+        proposed_edges = [e for e in all_works_at if e.status == "proposed"]
+        
+        if proposed_edges:
+            # Confirm the latest proposed edge
+            latest_proposed = proposed_edges[-1]
+            graph.confirm(latest_proposed.id)
+            confirmed.append(latest_proposed.id)
+            company_id = latest_proposed.object
+            
+            # Retire any other active works_at edges (past companies)
+            for e in all_works_at:
+                if e.id != latest_proposed.id and e.status in ("proposed", "confirmed", "corrected"):
+                    graph.retire(e.id)
+                    
+        # If we found a company, enrich it
+        if company_id:
+            # Get the actual company name to use for enrichment
+            company_node = graph.get_node(company_id)
+            if company_node:
+                scout.lead_enrich(graph, person_id=node_id, company_id=company_id)
+                
     return {"ok": True, "confirmed_edges": confirmed, "graph_changed": True}
 
 

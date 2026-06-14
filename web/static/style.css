@@ -432,3 +432,47 @@ body { display: flex; flex-direction: column; overflow: hidden; }
   border: 2px solid var(--surface);
 }
 ::-webkit-scrollbar-thumb:hover { background: #ccc; }
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,.4);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.modal-overlay[hidden] { display: none; }
+.modal {
+  background: var(--surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  width: 440px; max-width: 90vw;
+  padding: 24px; position: relative;
+  animation: slideIn .2s ease-out;
+}
+.modal-close {
+  position: absolute; top: 16px; right: 16px;
+  background: none; border: none; font-size: 24px;
+  line-height: 1; color: var(--ink-3); cursor: pointer;
+}
+.modal-close:hover { color: var(--ink); }
+.modal-title {
+  font-size: 18px; font-weight: 600; color: var(--ink);
+  margin-bottom: 16px;
+}
+.upload-area {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px; text-align: center;
+  background: var(--surface-2);
+  margin-bottom: 20px;
+}
+.sample-image {
+  max-width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+}
+.upload-hint {
+  font-size: 13px; color: var(--ink-3); margin-top: 12px;
+}
+.modal-actions {
+  display: flex; justify-content: flex-end;
+}

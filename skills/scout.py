@@ -11,6 +11,8 @@ inputs are mocked.
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import Any
 
 from graph import Edge, GraphCore, Node
@@ -30,75 +32,129 @@ def card_scan(graph: GraphCore, card_id: str) -> dict[str, Any]:
     if not result.get("ok"):
         return {"ok": False, "error": result.get("error", "scan failed"), "candidates": [], "cards": []}
 
-    fields = {f["key"]: f for f in result["fields"]}
-    hints = result.get("node_hints", {})
-    person_id = hints.get("person")
-    company_id = hints.get("company")
-
-    # Ensure person/company nodes exist (idempotent upsert). The company name is
-    # the low-confidence field, so its node label is still provisional until
-    # confirmed — but the node must exist to hang edges on.
-    name = fields.get("name", {}).get("value", "Unknown contact")
-    company_name = fields.get("company", {}).get("value", "Unknown company")
-    if person_id:
-        graph.upsert_node(Node(id=person_id, type="person", label=name,
-                               props={"title": fields.get("title", {}).get("value", ""),
-                                      "email": fields.get("email", {}).get("value", ""),
-                                      "phone": fields.get("phone", {}).get("value", "")}))
-    if company_id:
-        graph.upsert_node(Node(id=company_id, type="company", label=company_name))
-
     new_cards: list[dict] = []
+    candidates = []
 
-    # works_at edge: proposed, real GraphCore write. Its confidence = the company
-    # field confidence (the weak link), so it routes to a card.
-    company_conf = fields.get("company", {}).get("confidence", 0.5)
-    if person_id and company_id:
-        edge = graph.propose(Edge(
-            subject=person_id, predicate="works_at", object=company_id,
-            source="business_card", extractor="GLiNER2",
-            confidence=company_conf, status="proposed",
-        ))
-        if router.route(company_conf) == "card":
-            new_cards.append(cards.make_card(
-                "N2",
-                title=f"Confirm company for {name}",
-                body=f"Extracted company: \"{company_name}\" (confidence {company_conf:.0%}).",
-                why="Company name OCR was low-confidence; confirm or correct before trusting it.",
-                target_edge_id=edge.id,
-                contact_id=person_id,
-                payload={"field": "company", "current": company_name, "edge_id": edge.id},
-            ))
+    for card_data in result.get("cards", []):
+        fields = {f["key"]: f for f in card_data["fields"]}
+        hints = card_data.get("node_hints", {})
+        person_id = hints.get("person")
+        company_id = hints.get("company")
 
-    candidates = [{
-        "node_id": person_id,
-        "label": name,
-        "company": company_name,
-        "fields": result["fields"],
-    }]
+        name = fields.get("name", {}).get("value", "Unknown contact")
+        company_name = fields.get("company", {}).get("value", "Unknown company")
+        if person_id:
+            graph.upsert_node(Node(id=person_id, type="person", label=name,
+                                   props={"title": fields.get("title", {}).get("value", ""),
+                                          "email": fields.get("email", {}).get("value", ""),
+                                          "phone": fields.get("phone", {}).get("value", "")}))
+        if company_id:
+            graph.upsert_node(Node(id=company_id, type="company", label=company_name))
+
+        company_conf = fields.get("company", {}).get("confidence", 0.5)
+        if person_id and company_id:
+            existing = [e for e in graph.query(subject=person_id, predicate="works_at") 
+                        if e.object == company_id and e.status in ("proposed", "confirmed", "corrected")]
+            if existing:
+                edge = existing[0]
+            else:
+                edge = graph.propose(Edge(
+                    subject=person_id, predicate="works_at", object=company_id,
+                    source="business_card", extractor="GeminiVision",
+                    confidence=company_conf, status="proposed",
+                ))
+            if router.route(company_conf) == "card":
+                new_cards.append(cards.make_card(
+                    "N2",
+                    title=f"Confirm company for {name}",
+                    body=f"Extracted company: \"{company_name}\" (confidence {company_conf:.0%}).",
+                    why="Company name OCR was low-confidence; confirm or correct before trusting it.",
+                    target_edge_id=edge.id,
+                    contact_id=person_id,
+                    payload={"field": "company", "current": company_name, "edge_id": edge.id},
+                ))
+
+        candidates.append({
+            "node_id": person_id,
+            "label": name,
+            "company": company_name,
+            "fields": card_data["fields"],
+        })
+        
     return {"ok": True, "candidates": candidates, "cards": new_cards}
 
 
-def lead_enrich(graph: GraphCore, company_id: str) -> dict[str, Any]:
-    """Enrich a company from fixtures -> multiple proposed edges in the graph.
+def lead_enrich(graph: GraphCore, person_id: str, company_id: str) -> dict[str, Any]:
+    """Enrich a person and company from real research agent -> multiple proposed edges in the graph.
 
     Returns {ok, edge_ids:[...]} . All edges are proposed; high-confidence ones
     still land as proposals (enrichment is machine-sourced, so a human can scan
     them on the graph rather than each becoming a card)."""
-    enrich = fixtures.get_company_enrichment(company_id)
-    if enrich is None:
-        return {"ok": False, "error": f"no enrichment for {company_id}", "edge_ids": []}
+    
+    company_node = graph.get_node(company_id)
+    person_node = graph.get_node(person_id)
+    if not company_node or not person_node:
+        return {"ok": False, "error": f"no company or person node found", "edge_ids": []}
+        
+    company_name = company_node.label
+    person_name = person_node.label
+    
+    try:
+        from module_a.research_agent import enrich_business_card_data
+    except ImportError:
+        _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.append(os.path.dirname(_ROOT))
+        from module_a.research_agent import enrich_business_card_data
+        
+    # Pass both names to do proper internet research
+    structured_data = {"name": person_name, "company": company_name}
+    try:
+        enriched_data = enrich_business_card_data(structured_data)
+    except Exception as e:
+        return {"ok": False, "error": f"Research agent failed: {e}", "edge_ids": []}
+
+    def _propose_unique(subj: str, pred: str, obj: Any, conf: float) -> Optional[Edge]:
+        existing = [e for e in graph.query(subject=subj, predicate=pred) 
+                    if e.object == obj and e.status in ("proposed", "confirmed", "corrected")]
+        if not existing:
+            return graph.propose(Edge(
+                subject=subj, predicate=pred, object=obj,
+                source="internet", extractor="Tavily", confidence=conf, status="proposed"
+            ))
+        return None
 
     edge_ids = []
-    for fact in enrich["facts"]:
-        edge = graph.propose(Edge(
-            subject=company_id,
-            predicate=fact["predicate"],
-            object=fact["object"],
-            source=fact["source"],
-            extractor="LLM",
-            confidence=fact["confidence"],
-            status="proposed",
-        ))
-        edge_ids.append(edge.id)
+    
+    # Map the output of enrich_business_card_data to graph edges
+    if enriched_data.get("company_website") and enriched_data["company_website"] != "N/A":
+        edge = _propose_unique(company_id, "has_website", enriched_data["company_website"], 0.9)
+        if edge: edge_ids.append(edge.id)
+        
+    if enriched_data.get("social_media_company") and isinstance(enriched_data["social_media_company"], list):
+        for url in enriched_data["social_media_company"]:
+            if url and url != "N/A":
+                edge = _propose_unique(company_id, "has_social", url, 0.8)
+                if edge: edge_ids.append(edge.id)
+
+    if enriched_data.get("social_media_person") and isinstance(enriched_data["social_media_person"], list):
+        for url in enriched_data["social_media_person"]:
+            if url and url != "N/A":
+                edge = _propose_unique(person_id, "has_social", url, 0.8)
+                if edge: edge_ids.append(edge.id)
+
+    if enriched_data.get("company_news_events"):
+        news = enriched_data["company_news_events"]
+        if isinstance(news, list):
+            for n in news:
+                edge = _propose_unique(company_id, "recent_news", n, 0.8)
+                if edge: edge_ids.append(edge.id)
+        elif isinstance(news, str) and news != "N/A":
+            edge = _propose_unique(company_id, "recent_news", news, 0.8)
+            if edge: edge_ids.append(edge.id)
+
+    desc = enriched_data.get("other_crm_info", "")
+    if desc and desc != "N/A":
+        company_node.props["description"] = desc
+        graph.upsert_node(company_node)
+
     return {"ok": True, "edge_ids": edge_ids}

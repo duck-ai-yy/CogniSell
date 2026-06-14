@@ -6,7 +6,7 @@
   <title>CogniSell — AI Relationship OS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=2">
   <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
 </head>
 <body>
@@ -85,7 +85,28 @@
     </section>
   </main>
 
+  <div class="modal-overlay" id="upload-modal" hidden>
+    <div class="modal">
+      <button class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+      <h3 class="modal-title">Scan Business Card</h3>
+      <div class="upload-area" id="upload-area">
+        <div id="image-preview-container">
+          <img src="/static/sample_real.png" alt="Sample Business Card" class="sample-image" />
+        </div>
+        <div id="camera-container" hidden>
+          <video id="camera-video" autoplay playsinline class="sample-image"></video>
+          <canvas id="camera-canvas" hidden></canvas>
+        </div>
+        <p class="upload-hint" id="upload-hint">Using sample image. Click 'Use Camera' to scan a real card.</p>
+      </div>
+      <div class="modal-actions" style="justify-content: space-between;">
+        <button class="btn btn-ghost" id="toggle-camera-btn">Use Camera</button>
+        <button class="btn btn-primary" id="start-scan-btn">Start Scan</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast" hidden></div>
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

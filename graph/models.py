@@ -8,7 +8,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Optional
 
 NODE_TYPES = ("person", "company", "project", "topic")
-EXTRACTORS = ("GLiNER2", "human", "LLM")
+EXTRACTORS = ("GLiNER2", "human", "LLM", "GeminiVision", "Tavily")
 STATUSES = ("proposed", "confirmed", "corrected", "retired")
 
 

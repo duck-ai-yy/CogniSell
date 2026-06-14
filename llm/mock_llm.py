@@ -80,27 +80,49 @@ def debate_arguments(ctx: dict[str, Any]) -> dict[str, Any]:
 
 
 def compose_cold_mail(ctx: dict[str, Any]) -> str:
-    """Draft a cold/re-engagement email. ctx may carry a chosen angle + tone
-    preference so 'remembered' choices visibly change the draft."""
+    """Draft a cold/re-engagement email using the real Sales Agent from module_b."""
+    try:
+        import os
+        import sys
+        from module_b.email_agent import write_cold_email
+    except ImportError:
+        import os
+        import sys
+        _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.append(os.path.dirname(_ROOT))
+        from module_b.email_agent import write_cold_email
+
     name = ctx.get("name", "there")
     company = ctx.get("company", "your team")
     project = ctx.get("project", "your current initiative")
     angle = ctx.get("angle") or "warm re-open around the live opportunity"
     tone = ctx.get("tone", "professional")
 
-    greeting = "Hi" if tone == "casual" else "Dear"
-    first_name = name.split()[0] if name and name != "there" else name
-
-    return (
-        f"{greeting} {first_name},\n\n"
-        f"It's been a little while since we last connected. I've been following "
-        f"{company}'s work on {project} and wanted to reach back out — "
-        f"{angle}.\n\n"
-        f"If it's useful, I'd love to grab 15 minutes this week to make sure we're "
-        f"aligned on where things stand and where we could help.\n\n"
-        f"Would Thursday or Friday work for a short call?\n\n"
-        f"Best regards,\nYour name"
+    # Read the product doc
+    _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    product_doc_path = os.path.join(os.path.dirname(_ROOT), "module_b", "our_product_doc.md")
+    
+    product_info = "Product documentation not available."
+    if os.path.exists(product_doc_path):
+        with open(product_doc_path, "r", encoding="utf-8") as f:
+            product_info = f.read()
+            
+    # Prepare prompt for the real agent
+    prompt = (
+        f"Recipient Name: {name}\n"
+        f"Recipient Company: {company}\n"
+        f"Context/Project: {project}\n"
+        f"Strategy/Angle: {angle}\n"
+        f"Tone: {tone}\n"
+        f"Please write a cold email based on the above information and our product capabilities."
     )
+    
+    try:
+        # Pass the product info and prompt
+        email_content = write_cold_email(product_info, prompt)
+        return email_content
+    except Exception as e:
+        return f"[Error generating email: {str(e)}]\n\nFallback drafting:\nHi {name.split()[0]},\n..."
 
 
 def catchup_suggestion(ctx: dict[str, Any]) -> dict[str, Any]:
