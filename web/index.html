@@ -91,15 +91,17 @@
       <h3 class="modal-title">Scan Business Card</h3>
       <div class="upload-area" id="upload-area">
         <div id="image-preview-container">
-          <img src="/static/sample_real.png" alt="Sample Business Card" class="sample-image" />
+          <img src="/static/sample_real.png" alt="Sample Business Card" class="sample-image" id="preview-img" />
         </div>
         <div id="camera-container" hidden>
           <video id="camera-video" autoplay playsinline class="sample-image"></video>
           <canvas id="camera-canvas" hidden></canvas>
         </div>
-        <p class="upload-hint" id="upload-hint">Using sample image. Click 'Use Camera' to scan a real card.</p>
+        <p class="upload-hint" id="upload-hint">Using sample image. Click 'Use Camera' or 'Upload Image' to scan a real card.</p>
       </div>
       <div class="modal-actions" style="justify-content: space-between;">
+        <input type="file" id="file-input" accept="image/*" style="display: none;" />
+        <button class="btn btn-ghost" id="upload-btn">Upload Image</button>
         <button class="btn btn-ghost" id="toggle-camera-btn">Use Camera</button>
         <button class="btn btn-primary" id="start-scan-btn">Start Scan</button>
       </div>

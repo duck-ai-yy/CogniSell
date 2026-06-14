@@ -574,6 +574,16 @@ async function scanFlow() {
         throw new Error(detail);
       }
       scan = await resp.json();
+    } else if (uploadedFile) {
+      const formData = new FormData();
+      formData.append('file', uploadedFile, uploadedFile.name);
+      const resp = await fetch('/api/scan', { method: 'POST', body: formData });
+      if (!resp.ok) {
+        let detail = 'HTTP ' + resp.status;
+        try { detail = (await resp.json()).detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      scan = await resp.json();
     } else {
       scan = await api('POST', '/api/scan');
     }
@@ -752,9 +762,11 @@ async function handleVoice(transcript) {
 // ── Camera and Modal ──
 let useCamera = false;
 let cameraStream = null;
+let uploadedFile = null;
 
 async function toggleCamera() {
   useCamera = !useCamera;
+  uploadedFile = null; // clear uploaded file if any
   const video = $('camera-video');
   const imgContainer = $('image-preview-container');
   const camContainer = $('camera-container');
@@ -769,6 +781,7 @@ async function toggleCamera() {
       camContainer.hidden = false;
       hint.textContent = 'Position card in view and click Start Scan.';
       btn.textContent = 'Use Sample';
+      $('preview-img').src = '/static/sample_real.png';
     } catch (err) {
       useCamera = false;
       toast('Camera access denied or unavailable: ' + err.message);
@@ -780,8 +793,9 @@ async function toggleCamera() {
     }
     imgContainer.hidden = false;
     camContainer.hidden = true;
-    hint.textContent = 'Using sample image. Click \'Use Camera\' to scan a real card.';
+    hint.textContent = 'Using sample image. Click \'Use Camera\' or \'Upload Image\' to scan a real card.';
     btn.textContent = 'Use Camera';
+    $('preview-img').src = '/static/sample_real.png';
   }
 }
 
@@ -792,8 +806,25 @@ function openUploadModal() {
 $('modal-close').addEventListener('click', () => { 
   $('upload-modal').hidden = true; 
   if (useCamera) toggleCamera();
+  uploadedFile = null;
 });
 $('toggle-camera-btn').addEventListener('click', toggleCamera);
+
+$('upload-btn').addEventListener('click', () => $('file-input').click());
+$('file-input').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    uploadedFile = file;
+    if (useCamera) toggleCamera(); // switch out of camera mode
+    $('camera-container').hidden = true;
+    $('image-preview-container').hidden = false;
+    const url = URL.createObjectURL(file);
+    $('preview-img').src = url;
+    $('upload-hint').textContent = 'Using uploaded image: ' + file.name;
+    $('toggle-camera-btn').textContent = 'Use Camera';
+  }
+});
+
 $('start-scan-btn').addEventListener('click', () => {
   $('upload-modal').hidden = true;
   scanFlow();
