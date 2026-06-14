@@ -159,6 +159,58 @@ def scan(file: Optional[UploadFile] = File(None)) -> dict:
     _push_cards(result["cards"])
     return {"ok": True, "candidates": result["candidates"], "cards_added": len(result["cards"])}
 
+class AddNodeBody(BaseModel):
+    name: str
+    company: Optional[str] = None
+    title: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+
+@app.post("/api/nodes")
+def add_person(body: AddNodeBody) -> dict:
+    import uuid
+    import re
+    def safe_id(prefix, text):
+        if not text: return f"{prefix}_{uuid.uuid4().hex[:8]}"
+        clean = re.sub(r'[^a-z0-9]', '', text.lower())
+        return f"{prefix}_{clean}"
+        
+    name = body.name or "Unknown Contact"
+    company = body.company or "Unknown Company"
+    
+    person_id = safe_id("n_person", name)
+    company_id = safe_id("n_company", company)
+    
+    # Check if person already exists to prevent duplicate logically
+    if graph.get_node(person_id):
+        # Already exists, just return it or we could append random string
+        # Let's just append random string if user wants multiple same name
+        # But wait, user said "人物不要重复" (persons shouldn't duplicate). 
+        # So we should reuse the same person_id and just add new edges or do nothing!
+        pass 
+        
+    graph.upsert_node(Node(id=person_id, label=name, type="person"))
+    if body.company:
+        graph.upsert_node(Node(id=company_id, label=company, type="company"))
+        graph.propose(Edge(subject=person_id, predicate="works_at", object=company_id, source="manual", extractor="human", confidence=1.0))
+        
+    if body.title:
+        graph.propose(Edge(subject=person_id, predicate="title", object=body.title, source="manual", extractor="human", confidence=1.0))
+    if body.email:
+        graph.propose(Edge(subject=person_id, predicate="email", object=body.email, source="manual", extractor="human", confidence=1.0))
+    if body.phone:
+        graph.propose(Edge(subject=person_id, predicate="phone", object=body.phone, source="manual", extractor="human", confidence=1.0))
+        
+    return {"ok": True, "node_id": person_id}
+
+@app.delete("/api/nodes/{node_id}")
+def delete_node(node_id: str) -> dict:
+    node = graph.get_node(node_id)
+    if not node:
+        raise HTTPException(status_code=404, detail="node not found")
+    graph.delete_node(node_id)
+    return {"ok": True}
+
 @app.post("/api/scan/select")
 def scan_select(body: SelectBody) -> dict:
     _require_skill("scout")

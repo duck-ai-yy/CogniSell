@@ -111,6 +111,21 @@ class GraphCore:
         self.save()
         return node
 
+    def delete_node(self, node_id: str) -> None:
+        """Deletes a node and any edges where it is the subject or object."""
+        if node_id in self._nodes:
+            del self._nodes[node_id]
+            
+        # Find all edges connecting to this node
+        edges_to_delete = [
+            e_id for e_id, e in self._edges.items()
+            if e.subject == node_id or e.object == node_id
+        ]
+        for e_id in edges_to_delete:
+            del self._edges[e_id]
+            
+        self.save()
+
     def propose(self, edge: Edge) -> Edge:
         edge.status = "proposed"
         edge.t = time.time()

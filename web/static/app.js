@@ -150,9 +150,11 @@ function literalId(edge) {
 }
 
 function buildElements(snap) {
-  const nodeIds = new Set(snap.nodes.map(n => n.id));
+  const allowedTypes = new Set(['person', 'company']);
+  const filteredNodes = snap.nodes.filter(n => allowedTypes.has(n.type));
+  const nodeIds = new Set(filteredNodes.map(n => n.id));
   const nodes = [];
-  for (const n of snap.nodes) {
+  for (const n of filteredNodes) {
     const d = { id: n.id, label: n.label, ntype: n.type, ...n.props };
     if (n.type === 'person') {
       const cold = isColdContact(n.id);
@@ -174,12 +176,12 @@ function buildElements(snap) {
 
   for (const e of snap.edges) {
     if (!nodeIds.has(e.subject)) continue;
+    
+    // Only show edges between existing nodes (person to company, etc.)
+    // Do not create literal nodes for raw string values
     let target = e.object;
-    if (!nodeIds.has(e.object)) {
-      target = literalId(e);
-      nodes.push({ data: {
-        id: target, label: String(e.object), ntype: 'literal',
-      }});
+    if (!nodeIds.has(target)) {
+      continue;
     }
     const key = `${e.subject}__${target}`;
     const newEdge = { data: {
@@ -427,9 +429,28 @@ function openDetail(nodeId) {
     }
     html += '</div>';
   }
+  
+  if (node.type === 'person') {
+    html += '<div class="detail-section" style="margin-top: 20px;">';
+    html += '<button class="btn btn-primary" id="delete-node-btn" style="background-color: #ef4444; width: 100%;">Delete Person</button>';
+    html += '</div>';
+  }
 
   $('detail-content').innerHTML = html;
   $('detail-panel').hidden = false;
+  
+  if (node.type === 'person') {
+    $('delete-node-btn').onclick = async () => {
+      if (!confirm(`Are you sure you want to delete ${node.label}?`)) return;
+      try {
+        const res = await fetch(`/api/nodes/${nodeId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Failed to delete');
+        $('detail-panel').hidden = true;
+        await loadGraph();
+        toast(`${node.label} deleted.`);
+      } catch (err) { toast('Could not delete: ' + err.message); }
+    };
+  }
 }
 
 $('detail-close').addEventListener('click', () => { $('detail-panel').hidden = true; });
@@ -913,5 +934,24 @@ $('start-scan-btn').addEventListener('click', () => {
   scanFlow(currentUseCamera, currentUploadedFile, capturePromise);
 });
 $('scan-btn').addEventListener('click', openUploadModal);
+
+$('add-person-btn').addEventListener('click', async () => {
+  const name = prompt("Enter person's name:");
+  if (!name || !name.trim()) return;
+  const company = prompt("Enter company name (optional):");
+  try {
+    const res = await fetch('/api/nodes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), company: company ? company.trim() : "" })
+    });
+    if (!res.ok) throw new Error('Failed to add person');
+    await loadGraph();
+    toast(`Added ${name.trim()}`);
+  } catch (err) {
+    toast('Error: ' + err.message);
+  }
+});
+
 setupVoice();
 loadGraph();
