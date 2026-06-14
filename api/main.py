@@ -656,8 +656,8 @@ def pcb_quote(body: PcbQuoteBody) -> dict:
 
     email_text = (body.email_text or _PCB_DEMO_RFQ).strip()
 
-    api_key = "***REMOVED_API_KEY***"
-    model_id = "4e5d60fb-d931-4e8b-9225-fae901e5ba11"
+    api_key = os.environ.get("PIONEER_API_KEY", "")
+    model_id = os.environ.get("GLINER_MODEL_ID", "")
     raw = None
     source = "mock"
     if api_key and model_id and body.email_text:

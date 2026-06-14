@@ -18,8 +18,27 @@ class BusinessCardInfo(BaseModel):
 class BusinessCardList(BaseModel):
     cards: list[BusinessCardInfo] = Field(description="List of business cards found in the image. Return an empty list if no business cards are present.")
 
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
+
+def _safe_image_path(image_path: str) -> str:
+    """Validate an image path before opening to prevent file-inclusion/traversal."""
+    if not image_path or not isinstance(image_path, str) or "\x00" in image_path:
+        raise ValueError("Invalid image path.")
+    resolved = os.path.realpath(image_path)
+    base = os.environ.get("CARD_DATA_DIR")
+    if base:
+        base = os.path.realpath(base)
+        if resolved != base and not resolved.startswith(base + os.sep):
+            raise ValueError("Image path escapes the allowed data directory.")
+    if os.path.splitext(resolved)[1].lower() not in _IMAGE_EXTS:
+        raise ValueError("Unsupported image file type.")
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"Image file not found: {image_path}")
+    return resolved
+
 def encode_image(image_path):
-    with open(image_path, "rb") as image_file:
+    safe_path = _safe_image_path(image_path)
+    with open(safe_path, "rb") as image_file:
         return base64.b64encode(image_file.read()).decode('utf-8')
 
 def parse_business_card_image(image_path: str) -> dict:

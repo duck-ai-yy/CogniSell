@@ -100,8 +100,8 @@ function seedStreamItem(agent, text) {
   row.className = 'stream-item';
   const color = AGENT_COLORS[agent] || '#6b7280';
   row.innerHTML =
-    '<span class="agent-dot" style="background:' + color + '"></span>' +
-    '<span class="agent-label">' + agent + '</span>' +
+    '<span class="agent-dot" style="background:' + esc(color) + '"></span>' +
+    '<span class="agent-label">' + esc(agent) + '</span>' +
     '<span class="agent-text">' + esc(text) + '</span>' +
     '<span class="agent-status"><span class="check-mark">✓</span></span>';
   task.streamItems.push(row);
@@ -492,7 +492,7 @@ function openDetail(nodeId) {
     html += '<div class="detail-section"><div class="detail-section-title">Details</div>';
     for (const [k, v] of attrKeys) {
       if (!v) continue;
-      html += '<div class="detail-attr"><span class="k">' + labelize(k) + '</span><span class="v">' + esc(v) + '</span></div>';
+      html += '<div class="detail-attr"><span class="k">' + esc(labelize(k)) + '</span><span class="v">' + esc(v) + '</span></div>';
     }
     html += '</div>';
   }
@@ -504,10 +504,10 @@ function openDetail(nodeId) {
       const obj = objNode ? objNode.label : e.object;
       const isNew = e.source === 'social_monitor';
       html += '<div class="detail-edge' + (isNew ? ' change-highlight' : '') + '">';
-      html += '<div class="rel">' + labelize(e.predicate) + ' &rarr; <b>' + esc(obj) + '</b></div>';
-      html += '<div class="meta"><span class="status-chip ' + e.status + '">' + e.status + '</span>';
+      html += '<div class="rel">' + esc(labelize(e.predicate)) + ' &rarr; <b>' + esc(obj) + '</b></div>';
+      html += '<div class="meta"><span class="status-chip ' + esc(e.status) + '">' + esc(e.status) + '</span>';
       html += '<span>' + Math.round(e.confidence * 100) + '%</span>';
-      html += '<span>&middot; ' + e.extractor + '</span>';
+      html += '<span>&middot; ' + esc(e.extractor) + '</span>';
       html += '<span>&middot; ' + relTime(e.t) + '</span></div></div>';
     }
     html += '</div>';
@@ -518,7 +518,7 @@ function openDetail(nodeId) {
     for (const e of retiredEdges) {
       const objNode = SNAP.nodes.find(n => n.id === e.object);
       html += '<div class="detail-edge" style="opacity:.55">';
-      html += '<div class="rel">' + labelize(e.predicate) + ' &rarr; ' + esc(objNode ? objNode.label : e.object) + '</div>';
+      html += '<div class="rel">' + esc(labelize(e.predicate)) + ' &rarr; ' + esc(objNode ? objNode.label : e.object) + '</div>';
       html += '<div class="meta"><span class="status-chip retired">retired</span><span>superseded</span></div></div>';
     }
     html += '</div>';
@@ -608,8 +608,8 @@ function actStream(agent, text) {
   row.className = 'stream-item';
   const color = AGENT_COLORS[agent] || '#6b7280';
   row.innerHTML =
-    '<span class="agent-dot" style="background:' + color + '"></span>' +
-    '<span class="agent-label">' + agent + '</span>' +
+    '<span class="agent-dot" style="background:' + esc(color) + '"></span>' +
+    '<span class="agent-label">' + esc(agent) + '</span>' +
     '<span class="agent-text"></span>' +
     '<span class="agent-status"><span class="spinner-sm"></span></span>';
   const _task = activeTask();
@@ -714,7 +714,7 @@ function buildCardEl(c) {
   }
 
   el.innerHTML =
-    '<div class="card-header"><span class="card-badge ' + badgeCls + '">' + badgeText + '</span>' +
+    '<div class="card-header"><span class="card-badge ' + esc(badgeCls) + '">' + esc(badgeText) + '</span>' +
     '<span class="card-title">' + esc(c.title) + '</span></div>' +
     body +
     (c.why ? '<div class="card-hint">' + esc(c.why) + '</div>' : '') +

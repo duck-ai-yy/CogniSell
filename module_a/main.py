@@ -8,6 +8,18 @@ from agent import parse_business_card_image
 # Load environment variables from .env file
 load_dotenv()
 
+def _safe_output_path(output_json: str) -> str:
+    """Validate an output path before writing to prevent traversal."""
+    if not output_json or not isinstance(output_json, str) or "\x00" in output_json:
+        raise ValueError("Invalid output path.")
+    resolved = os.path.realpath(output_json)
+    base = os.environ.get("CARD_DATA_DIR")
+    if base:
+        base = os.path.realpath(base)
+        if resolved != base and not resolved.startswith(base + os.sep):
+            raise ValueError("Output path escapes the allowed data directory.")
+    return resolved
+
 def process_image(image_path, output_json="results.json"):
     print(f"Processing main image: {image_path}")
     
@@ -50,7 +62,8 @@ def process_image(image_path, output_json="results.json"):
         print(f"Enriched Info: {enriched_data}")
 
     # Output to JSON
-    with open(output_json, 'w', encoding='utf-8') as f:
+    safe_output = _safe_output_path(output_json)
+    with open(safe_output, 'w', encoding='utf-8') as f:
         json.dump(all_cards_info, f, indent=4, ensure_ascii=False)
         
     print(f"\nAll done! Results saved to {output_json}")

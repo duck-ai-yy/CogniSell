@@ -4,20 +4,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+def _safe_read_path(path: str) -> str:
+    """Validate a path before reading to prevent file-inclusion/traversal."""
+    if not path or not isinstance(path, str) or "\x00" in path:
+        raise ValueError("Invalid file path.")
+    resolved = os.path.realpath(path)
+    base = os.environ.get("CARD_DATA_DIR")
+    if base:
+        base = os.path.realpath(base)
+        if resolved != base and not resolved.startswith(base + os.sep):
+            raise ValueError("Path escapes the allowed data directory.")
+    if not os.path.isfile(resolved):
+        raise FileNotFoundError(f"File not found: {path}")
+    return resolved
+
 def load_text_file(filepath: str) -> str:
-    if not os.path.exists(filepath):
-        raise FileNotFoundError(f"File not found: {filepath}")
-    with open(filepath, "r", encoding="utf-8") as f:
+    safe_path = _safe_read_path(filepath)
+    with open(safe_path, "r", encoding="utf-8") as f:
         return f.read()
 
 def load_lead_profile(results_json_path: str, company: str, recipient: str = None) -> dict:
     """
     Search results.json for a matching company and/or recipient name.
     """
-    if not os.path.exists(results_json_path):
-        raise FileNotFoundError(f"Lead data file not found: {results_json_path}")
-        
-    with open(results_json_path, "r", encoding="utf-8") as f:
+    safe_path = _safe_read_path(results_json_path)
+    with open(safe_path, "r", encoding="utf-8") as f:
         leads = json.load(f)
         
     # Standardize input for searching
